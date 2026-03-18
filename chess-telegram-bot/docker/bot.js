@@ -101,15 +101,21 @@ async function main() {
     err.ctx.reply("❌ Произошла ошибка. Попробуйте ещё раз.").catch(() => {});
   });
 
-  await bot.api.setMyCommands([
-    { command: "start",   description: "Главное меню" },
-    { command: "newgame", description: "Создать новую игру" },
-    { command: "join",    description: "Присоединиться к игре" },
-    { command: "move",    description: "Сделать ход (напр. e2e4)" },
-    { command: "board",   description: "Показать текущую доску" },
-    { command: "resign",  description: "Сдаться" },
-    { command: "games",   description: "Список открытых игр" },
-  ]);
+  log('INFO', 'Устанавливаем команды бота...');
+  try {
+    await bot.api.setMyCommands([
+      { command: "start",   description: "Главное меню" },
+      { command: "newgame", description: "Создать новую игру" },
+      { command: "join",    description: "Присоединиться к игре" },
+      { command: "move",    description: "Сделать ход (напр. e2e4)" },
+      { command: "board",   description: "Показать текущую доску" },
+      { command: "resign",  description: "Сдаться" },
+      { command: "games",   description: "Список открытых игр" },
+    ]);
+    log('INFO', 'Команды установлены');
+  } catch (err) {
+    log('ERROR', 'Ошибка setMyCommands', err.message);
+  }
 
   // ==================== DB ====================
   async function getOrCreateUser(telegramId, username, firstName) {
@@ -469,9 +475,16 @@ async function main() {
   }
 
   // Удаляем вебхук если был установлен — иначе polling не запустится
-  await bot.api.deleteWebhook({ drop_pending_updates: false });
+  log('INFO', 'Удаляем вебхук...');
+  try {
+    await bot.api.deleteWebhook({ drop_pending_updates: false });
+    log('INFO', 'Вебхук удалён');
+  } catch (err) {
+    log('WARN', 'deleteWebhook error (не критично)', err.message);
+  }
 
   // ==================== ЗАПУСК ====================
+  log('INFO', 'Запускаем polling...');
   await bot.start();
   log('SUCCESS', 'Chess Bot успешно запущен!');
 }

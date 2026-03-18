@@ -2,7 +2,7 @@ version: "3.7"
 
 services:
   app:
-    image: pitcentr/chess-telegram-bot:1.0.4
+    image: pitcentr/chess-telegram-bot:1.0.5
     user: "1000:1000"
     init: true
     restart: unless-stopped
