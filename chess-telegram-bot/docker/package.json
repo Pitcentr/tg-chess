@@ -6,6 +6,6 @@
     "pocketbase": "^0.21.5",
     "dotenv": "^16.4.5",
     "chess.js": "^0.13.4",
-    "chess-image-generator": "^0.9.4"
+    "@napi-rs/canvas": "^0.1.53"
   }
 }

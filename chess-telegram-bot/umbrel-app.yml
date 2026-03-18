@@ -4,7 +4,7 @@ name: Chess Telegram Bot
 tagline: Play chess with friends via Telegram
 icon: https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/icon.svg
 category: social
-version: "1.0.10"
+version: "1.0.11"
 description: >-
   Telegram bot for playing chess with friends.
 
@@ -26,7 +26,7 @@ support: https://github.com/pitcentr/chess-telegram-bot/issues
 gallery:
   - https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/screenshots/screenshot1.svg
 releaseNotes: >-
-  v1.0.10: Fix Docker build — switched to node:20-slim (Debian) for canvas native deps.
+  v1.0.11: Replace chess-image-generator with @napi-rs/canvas (pre-built binaries, no native compilation).
 dependencies: []
 path: ""
 defaultUsername: ""

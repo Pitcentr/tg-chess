@@ -2,12 +2,9 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { Chess } from "chess.js";
 import PocketBase from "pocketbase";
 import dotenv from "dotenv";
-import { createRequire } from "module";
+import { createCanvas } from "@napi-rs/canvas";
 
 dotenv.config();
-
-const require = createRequire(import.meta.url);
-const ChessImageGenerator = require("chess-image-generator");
 
 const REQUIRED_ENV = ['TG_TOKEN', 'PB_URL', 'PB_ADMIN', 'PB_PASSWORD'];
 
@@ -18,16 +15,88 @@ function log(level, message, data = null) {
 }
 
 // ── Board PNG ─────────────────────────────────────────────────────────────────
+const PIECES = {
+  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
+  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+};
+const LIGHT = "#F0D9B5";
+const DARK  = "#B58863";
+const SQ    = 72;
+const PAD   = 28;
+const SIZE  = SQ * 8 + PAD * 2;
+
 async function renderBoard(fen, perspective = "white") {
-  const generator = new ChessImageGenerator({
-    size: 512,
-    light:  "rgb(240, 217, 181)",
-    dark:   "rgb(181, 136, 99)",
-    style:  "merida",
-    flipped: perspective === "black",
+  const canvas  = createCanvas(SIZE, SIZE);
+  const ctx     = canvas.getContext("2d");
+  const flipped = perspective === "black";
+
+  // Background
+  ctx.fillStyle = "#2b2b2b";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Parse FEN position
+  const position = fen.split(" ")[0];
+  const rows = position.split("/");
+  const board = rows.map(row => {
+    const cells = [];
+    for (const ch of row) {
+      if (/\d/.test(ch)) {
+        for (let i = 0; i < parseInt(ch); i++) cells.push(null);
+      } else {
+        cells.push(ch);
+      }
+    }
+    return cells;
   });
-  await generator.loadFEN(fen);
-  return await generator.generateBuffer();
+
+  // Draw squares and pieces
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const dispR = flipped ? 7 - r : r;
+      const dispF = flipped ? 7 - f : f;
+      const x = PAD + dispF * SQ;
+      const y = PAD + dispR * SQ;
+
+      ctx.fillStyle = (r + f) % 2 === 0 ? LIGHT : DARK;
+      ctx.fillRect(x, y, SQ, SQ);
+
+      const piece = board[r][f];
+      if (piece) {
+        const isWhitePiece = piece === piece.toUpperCase();
+        ctx.font = `${SQ * 0.78}px serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        // Drop shadow for contrast
+        ctx.fillStyle = isWhitePiece ? "#555" : "#000";
+        ctx.fillText(PIECES[piece], x + SQ / 2 + 1, y + SQ / 2 + 2);
+        ctx.fillStyle = isWhitePiece ? "#fff" : "#111";
+        ctx.fillText(PIECES[piece], x + SQ / 2, y + SQ / 2);
+      }
+    }
+  }
+
+  // Rank labels (1-8)
+  ctx.font = "bold 13px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  for (let r = 0; r < 8; r++) {
+    const label = flipped ? r + 1 : 8 - r;
+    const y = PAD + r * SQ + SQ / 2;
+    ctx.fillStyle = "#ccc";
+    ctx.fillText(String(label), PAD / 2, y);
+    ctx.fillText(String(label), SIZE - PAD / 2, y);
+  }
+
+  // File labels (a-h)
+  const files = flipped ? "hgfedcba" : "abcdefgh";
+  for (let f = 0; f < 8; f++) {
+    const x = PAD + f * SQ + SQ / 2;
+    ctx.fillStyle = "#ccc";
+    ctx.fillText(files[f], x, PAD / 2);
+    ctx.fillText(files[f], x, SIZE - PAD / 2);
+  }
+
+  return canvas.toBuffer("image/png");
 }
 
 // chess.js v0.13 API
@@ -156,14 +225,12 @@ async function main() {
     const moveInfo   = `✅ Ход: <code>${result.san}</code> (${moverName})`;
     const myCaption  = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...");
 
-    // Send board as photo to mover
     const myBoard = await renderBoard(newFen, myColor);
     await ctx.replyWithPhoto(new InputFile(myBoard, "board.png"), {
       caption: myCaption,
       parse_mode: "HTML",
     });
 
-    // Notify opponent
     if (opponentId) {
       const oppStatus = isOver
         ? (chess.in_checkmate() ? `\n\n♟ Шах и мат! Победили ${moverName}!` : `\n\n🤝 ${statusTxt}`)
@@ -197,7 +264,6 @@ async function main() {
     const whiteName = await getPlayerName(updated.player_white);
     const blackName = await getPlayerName(updated.player_black);
 
-    // Notify white player
     try {
       const whiteBoard = await renderBoard(updated.fen, "white");
       await bot.api.sendPhoto(updated.player_white, new InputFile(whiteBoard, "board.png"), {
@@ -206,7 +272,6 @@ async function main() {
       });
     } catch {}
 
-    // Reply to black player
     const blackBoard = await renderBoard(updated.fen, "black");
     await ctx.replyWithPhoto(new InputFile(blackBoard, "board.png"), {
       caption: `♟ <b>Игра началась!</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n⏳ Ждите хода белых...\n💡 Пишите ход прямо в чат: <code>e7e5</code>`,
@@ -346,7 +411,7 @@ async function main() {
     await ctx.replyWithPhoto(new InputFile(board, "board.png"), { caption, parse_mode: "HTML" });
   });
 
-  // ── Text messages (after commands) ──────────────────────────────────────────
+  // ── Text messages ───────────────────────────────────────────────────────────
   bot.on("message:text", async (ctx) => {
     const text   = ctx.message.text.trim();
     const userId = String(ctx.from.id);
@@ -364,7 +429,6 @@ async function main() {
       return processMove(ctx, userId, text);
     }
 
-    // Forward text to opponent
     if (opponentId) {
       const myName = await getPlayerName(userId);
       try {
