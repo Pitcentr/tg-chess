@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { Chess } from "chess.js";
 import PocketBase from "pocketbase";
 import dotenv from "dotenv";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, Path2D } from "@napi-rs/canvas";
 
 dotenv.config();
 
@@ -15,29 +15,92 @@ function log(level, message, data = null) {
 }
 
 // ── Board PNG ─────────────────────────────────────────────────────────────────
-const PIECES = {
-  K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
-  k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟",
+// CBurnett piece paths (Lichess set) — each defined on a 45x45 grid
+// Source: https://github.com/lichess-org/lila/tree/master/public/piece/cburnett
+const PIECE_PATHS = {
+  // Pawn
+  P: `M 22.5,9 C 19.8,9 17.5,10.6 17.5,13.5 C 17.5,15.3 18.5,16.8 20,17.7
+      C 16.5,19.2 14,22.3 14,26 C 14,27.9 14.6,29.7 15.7,31.1
+      C 13.1,32.3 11,35 11,38 L 34,38 C 34,35 31.9,32.3 29.3,31.1
+      C 30.4,29.7 31,27.9 31,26 C 31,22.3 28.5,19.2 25,17.7
+      C 26.5,16.8 27.5,15.3 27.5,13.5 C 27.5,10.6 25.2,9 22.5,9 Z`,
+  // Rook
+  R: `M 9,39 L 36,39 L 36,36 L 9,36 Z
+      M 12,36 L 12,32 L 33,32 L 33,36 Z
+      M 11,14 L 11,9 L 15,9 L 15,11 L 20,11 L 20,9 L 25,9 L 25,11 L 30,11 L 30,9 L 34,9 L 34,14 Z
+      M 34,14 Q 36,14 36,16 L 36,32 L 9,32 L 9,16 Q 9,14 11,14 Z`,
+  // Knight
+  N: `M 22,10 C 18,10 13,14 13,20 C 13,23 14,25.5 16,27.5
+      C 14,28.5 11,31 11,35 L 34,35 C 34,31 31,28.5 29,27.5
+      C 31,25.5 32,23 32,20 C 32,14 27,10 22,10 Z
+      M 18,24 C 17,22 17,19 19,17 C 21,15 24,15 26,17 C 28,19 28,22 27,24 Z`,
+  // Bishop
+  B: `M 22.5,9 C 20,9 18,11 18,13.5 C 18,15 18.7,16.3 19.8,17.2
+      C 16,19 13,22.5 13,27 C 13,29 13.7,30.8 15,32.2
+      C 12.5,33.5 11,36 11,39 L 34,39 C 34,36 32.5,33.5 30,32.2
+      C 31.3,30.8 32,29 32,27 C 32,22.5 29,19 25.2,17.2
+      C 26.3,16.3 27,15 27,13.5 C 27,11 25,9 22.5,9 Z
+      M 22.5,12 C 23.6,12 24.5,12.9 24.5,14 C 24.5,15.1 23.6,16 22.5,16 C 21.4,16 20.5,15.1 20.5,14 C 20.5,12.9 21.4,12 22.5,12 Z`,
+  // Queen
+  Q: `M 9,26 C 9,28.8 10.5,31.3 13,32.5 L 13,36 L 32,36 L 32,32.5
+      C 34.5,31.3 36,28.8 36,26 C 36,22 33.5,18.5 30,17
+      C 30,14 28,11 25,10 C 25,8 23.8,7 22.5,7 C 21.2,7 20,8 20,10
+      C 17,11 15,14 15,17 C 11.5,18.5 9,22 9,26 Z
+      M 22.5,7 C 23.3,7 24,7.7 24,8.5 C 24,9.3 23.3,10 22.5,10 C 21.7,10 21,9.3 21,8.5 C 21,7.7 21.7,7 22.5,7 Z
+      M 13,17 C 14.1,17 15,17.9 15,19 C 15,20.1 14.1,21 13,21 C 11.9,21 11,20.1 11,19 C 11,17.9 11.9,17 13,17 Z
+      M 32,17 C 33.1,17 34,17.9 34,19 C 34,20.1 33.1,21 32,21 C 30.9,21 30,20.1 30,19 C 30,17.9 30.9,17 32,17 Z
+      M 9,39 L 36,39 L 36,36 L 9,36 Z`,
+  // King
+  K: `M 22.5,11.63 L 22.5,6 M 20,8 L 25,8
+      M 22.5,25 C 22.5,25 27,17.5 25.5,14.5 C 25.5,14.5 24.5,12 22.5,12 C 20.5,12 19.5,14.5 19.5,14.5 C 18,17.5 22.5,25 22.5,25 Z
+      M 12,36 C 12,36 12,32 13,30 C 14,28 16,27 18,26.5 C 20,26 22.5,26 22.5,26 C 22.5,26 25,26 27,26.5 C 29,27 31,28 32,30 C 33,32 33,36 33,36 Z
+      M 11,38 L 34,38 L 34,36 L 11,36 Z
+      M 34,14 L 34,11 L 11,11 L 11,14 Z`,
 };
+
 const LIGHT = "#F0D9B5";
 const DARK  = "#B58863";
 const SQ    = 72;
-const PAD   = 28;
+const PAD   = 24;
 const SIZE  = SQ * 8 + PAD * 2;
+
+// Scale factor: piece paths are on 45x45, we need SQ x SQ
+const SCALE = SQ / 45;
+
+function drawPiece(ctx, piece, x, y) {
+  const isWhite = piece === piece.toUpperCase();
+  const key     = piece.toUpperCase();
+  const pathStr = PIECE_PATHS[key];
+  if (!pathStr) return;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(SCALE, SCALE);
+
+  const path = new Path2D(pathStr);
+
+  ctx.lineWidth = 1.5;
+  ctx.fillStyle = isWhite ? "#fff" : "#333";
+  ctx.fill(path);
+  ctx.strokeStyle = "#000";
+  ctx.stroke(path);
+
+  ctx.restore();
+}
 
 async function renderBoard(fen, perspective = "white") {
   const canvas  = createCanvas(SIZE, SIZE);
   const ctx     = canvas.getContext("2d");
   const flipped = perspective === "black";
 
-  // Background
+  // Background border
   ctx.fillStyle = "#2b2b2b";
   ctx.fillRect(0, 0, SIZE, SIZE);
 
-  // Parse FEN position
+  // Parse FEN
   const position = fen.split(" ")[0];
-  const rows = position.split("/");
-  const board = rows.map(row => {
+  const rows     = position.split("/");
+  const board    = rows.map(row => {
     const cells = [];
     for (const ch of row) {
       if (/\d/.test(ch)) {
@@ -49,51 +112,43 @@ async function renderBoard(fen, perspective = "white") {
     return cells;
   });
 
-  // Draw squares and pieces
+  // Draw squares
   for (let r = 0; r < 8; r++) {
     for (let f = 0; f < 8; f++) {
       const dispR = flipped ? 7 - r : r;
       const dispF = flipped ? 7 - f : f;
       const x = PAD + dispF * SQ;
       const y = PAD + dispR * SQ;
-
       ctx.fillStyle = (r + f) % 2 === 0 ? LIGHT : DARK;
       ctx.fillRect(x, y, SQ, SQ);
-
-      const piece = board[r][f];
-      if (piece) {
-        const isWhitePiece = piece === piece.toUpperCase();
-        ctx.font = `${SQ * 0.78}px serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        // Drop shadow for contrast
-        ctx.fillStyle = isWhitePiece ? "#555" : "#000";
-        ctx.fillText(PIECES[piece], x + SQ / 2 + 1, y + SQ / 2 + 2);
-        ctx.fillStyle = isWhitePiece ? "#fff" : "#111";
-        ctx.fillText(PIECES[piece], x + SQ / 2, y + SQ / 2);
-      }
     }
   }
 
-  // Rank labels (1-8)
-  ctx.font = "bold 13px sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  // Draw pieces
   for (let r = 0; r < 8; r++) {
-    const label = flipped ? r + 1 : 8 - r;
-    const y = PAD + r * SQ + SQ / 2;
-    ctx.fillStyle = "#ccc";
-    ctx.fillText(String(label), PAD / 2, y);
-    ctx.fillText(String(label), SIZE - PAD / 2, y);
+    for (let f = 0; f < 8; f++) {
+      const piece = board[r][f];
+      if (!piece) continue;
+      const dispR = flipped ? 7 - r : r;
+      const dispF = flipped ? 7 - f : f;
+      const x = PAD + dispF * SQ;
+      const y = PAD + dispR * SQ;
+      drawPiece(ctx, piece, x, y);
+    }
   }
 
-  // File labels (a-h)
+  // Coordinate labels
+  ctx.fillStyle   = "#999";
+  ctx.font        = "bold 11px sans-serif";
+  ctx.textAlign   = "center";
+  ctx.textBaseline = "middle";
   const files = flipped ? "hgfedcba" : "abcdefgh";
-  for (let f = 0; f < 8; f++) {
-    const x = PAD + f * SQ + SQ / 2;
-    ctx.fillStyle = "#ccc";
-    ctx.fillText(files[f], x, PAD / 2);
-    ctx.fillText(files[f], x, SIZE - PAD / 2);
+  for (let i = 0; i < 8; i++) {
+    const label = flipped ? i + 1 : 8 - i;
+    const yPos  = PAD + i * SQ + SQ / 2;
+    ctx.fillText(String(label), PAD / 2, yPos);
+    const xPos  = PAD + i * SQ + SQ / 2;
+    ctx.fillText(files[i], xPos, SIZE - PAD / 2);
   }
 
   return canvas.toBuffer("image/png");
