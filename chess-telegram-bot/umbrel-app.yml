@@ -4,7 +4,7 @@ name: Chess Telegram Bot
 tagline: Play chess with friends via Telegram
 icon: https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/icon.svg
 category: social
-version: "1.0.16"
+version: "1.0.17"
 description: >-
   Telegram bot for playing chess with friends.
 
@@ -26,7 +26,7 @@ support: https://github.com/pitcentr/chess-telegram-bot/issues
 gallery:
   - https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/screenshots/screenshot1.svg
 releaseNotes: >-
-  v1.0.16: DeepSeek AI position evaluation every 3rd move. Add DEEPSEEK_API_KEY env var.
+  v1.0.17: /eval command for on-demand AI position analysis. Removed auto-eval every 3rd move.
 dependencies: []
 path: ""
 defaultUsername: ""

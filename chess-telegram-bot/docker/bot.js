@@ -310,12 +310,8 @@ async function main() {
 
     // DeepSeek eval every 3rd move (skip if game over)
     let evalText = "";
-    if (!isOver && newMoveCount % 3 === 0) {
-      const eval_ = await evaluatePosition(newFen, whiteName, blackName);
-      evalText = formatEval(eval_, whiteName, blackName);
-    }
 
-    const myCaption = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...") + evalText;
+    const myCaption = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...");
 
     const myBoard = await renderBoard(newFen, myColor);
     await ctx.replyWithPhoto(new InputFile(myBoard, "board.png"), { caption: myCaption, parse_mode: "HTML" });
@@ -375,7 +371,8 @@ async function main() {
       `/move e2e4 — сделать ход\n/board — показать текущую доску\n` +
       `/resign — сдаться\n/games — список открытых игр\n\n` +
       `💡 Во время игры пишите ход прямо в чат: <code>e2e4</code>\n` +
-      `💬 Любой другой текст пересылается сопернику`,
+      `💬 Любой другой текст пересылается сопернику\n` +
+      `/eval — оценка позиции от AI`,
       { parse_mode: "HTML" }
     );
   });
@@ -461,6 +458,29 @@ async function main() {
     await ctx.reply(`🎮 Открытые игры (${res.items.length}):`, { reply_markup: kb });
   });
 
+  bot.command("eval", async (ctx) => {
+    log('INFO', `CMD /eval from ${ctx.from.id}`);
+    if (!process.env.DEEPSEEK_API_KEY) {
+      return ctx.reply("❌ DeepSeek API не настроен. Укажите DEEPSEEK_API_KEY.");
+    }
+    const userId = String(ctx.from.id);
+    const game   = await getActiveGame(userId);
+    if (!game)                    return ctx.reply("❌ У вас нет активной игры.");
+    if (game.status !== "active") return ctx.reply("❌ Игра ещё не началась.");
+
+    const thinking = await ctx.reply("🤖 Анализирую позицию...");
+    const whiteName = await getPlayerName(game.player_white);
+    const blackName = await getPlayerName(game.player_black);
+    const eval_     = await evaluatePosition(game.fen, whiteName, blackName);
+
+    const text = eval_
+      ? `🤖 <b>Оценка AI</b>\n` + formatEval(eval_, whiteName, blackName).trim()
+      : "❌ Не удалось получить оценку. Попробуйте позже.";
+
+    try { await bot.api.deleteMessage(ctx.chat.id, thinking.message_id); } catch {}
+    await ctx.reply(text, { parse_mode: "HTML" });
+  });
+
   bot.callbackQuery(/^join_(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await getOrCreateUser(ctx.from.id, ctx.from.username, ctx.from.first_name);
@@ -516,6 +536,7 @@ async function main() {
       { command: "join",    description: "Присоединиться к игре" },
       { command: "move",    description: "Сделать ход (напр. e2e4)" },
       { command: "board",   description: "Показать текущую доску" },
+      { command: "eval",    description: "Оценка позиции AI (DeepSeek)" },
       { command: "resign",  description: "Сдаться" },
       { command: "games",   description: "Список открытых игр" },
     ]);
