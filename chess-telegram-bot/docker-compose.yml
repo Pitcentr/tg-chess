@@ -2,7 +2,7 @@ version: "3.7"
 
 services:
   app:
-    build: ./docker
+    image: pitcentr/chess-telegram-bot:1.0.0
     user: "1000:1000"
     init: true
     restart: unless-stopped
