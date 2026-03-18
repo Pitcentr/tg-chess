@@ -2,9 +2,9 @@ manifestVersion: 1
 id: chess-telegram-bot
 name: Chess Telegram Bot
 tagline: Play chess with friends via Telegram
-icon: https://raw.githubusercontent.com/pitcentr/telegram-vault-store/main/vault-telegram-vault/metadata/icon.svg
+icon: https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/icon.svg
 category: social
-version: "1.0.0"
+version: "1.0.1"
 description: >-
   A self-hosted Telegram bot for playing chess with friends.
 
@@ -20,9 +20,10 @@ submitter: Self
 submission: https://github.com/pitcentr/chess-telegram-bot
 repo: https://github.com/pitcentr/chess-telegram-bot
 support: https://github.com/pitcentr/chess-telegram-bot/issues
-gallery: []
+gallery:
+  - https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/screenshots/screenshot1.svg
 releaseNotes: >-
-  v1.0.0: Initial release with full chess gameplay via Telegram.
+  v1.0.1: Fixed PocketBase connection and collection setup. External PocketBase support.
 dependencies: []
 path: ""
 defaultUsername: ""
