@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { Chess } from "chess.js";
 import PocketBase from "pocketbase";
 import dotenv from "dotenv";
-import { createCanvas, Path2D } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 
 dotenv.config();
 
@@ -14,100 +14,56 @@ function log(level, message, data = null) {
   if (data) console.dir(data, { depth: null });
 }
 
-// ── Board PNG ─────────────────────────────────────────────────────────────────
-// CBurnett piece paths (Lichess set) — each defined on a 45x45 grid
-// Source: https://github.com/lichess-org/lila/tree/master/public/piece/cburnett
-const PIECE_PATHS = {
-  // Pawn
-  P: `M 22.5,9 C 19.8,9 17.5,10.6 17.5,13.5 C 17.5,15.3 18.5,16.8 20,17.7
-      C 16.5,19.2 14,22.3 14,26 C 14,27.9 14.6,29.7 15.7,31.1
-      C 13.1,32.3 11,35 11,38 L 34,38 C 34,35 31.9,32.3 29.3,31.1
-      C 30.4,29.7 31,27.9 31,26 C 31,22.3 28.5,19.2 25,17.7
-      C 26.5,16.8 27.5,15.3 27.5,13.5 C 27.5,10.6 25.2,9 22.5,9 Z`,
-  // Rook
-  R: `M 9,39 L 36,39 L 36,36 L 9,36 Z
-      M 12,36 L 12,32 L 33,32 L 33,36 Z
-      M 11,14 L 11,9 L 15,9 L 15,11 L 20,11 L 20,9 L 25,9 L 25,11 L 30,11 L 30,9 L 34,9 L 34,14 Z
-      M 34,14 Q 36,14 36,16 L 36,32 L 9,32 L 9,16 Q 9,14 11,14 Z`,
-  // Knight
-  N: `M 22,10 C 18,10 13,14 13,20 C 13,23 14,25.5 16,27.5
-      C 14,28.5 11,31 11,35 L 34,35 C 34,31 31,28.5 29,27.5
-      C 31,25.5 32,23 32,20 C 32,14 27,10 22,10 Z
-      M 18,24 C 17,22 17,19 19,17 C 21,15 24,15 26,17 C 28,19 28,22 27,24 Z`,
-  // Bishop
-  B: `M 22.5,9 C 20,9 18,11 18,13.5 C 18,15 18.7,16.3 19.8,17.2
-      C 16,19 13,22.5 13,27 C 13,29 13.7,30.8 15,32.2
-      C 12.5,33.5 11,36 11,39 L 34,39 C 34,36 32.5,33.5 30,32.2
-      C 31.3,30.8 32,29 32,27 C 32,22.5 29,19 25.2,17.2
-      C 26.3,16.3 27,15 27,13.5 C 27,11 25,9 22.5,9 Z
-      M 22.5,12 C 23.6,12 24.5,12.9 24.5,14 C 24.5,15.1 23.6,16 22.5,16 C 21.4,16 20.5,15.1 20.5,14 C 20.5,12.9 21.4,12 22.5,12 Z`,
-  // Queen
-  Q: `M 9,26 C 9,28.8 10.5,31.3 13,32.5 L 13,36 L 32,36 L 32,32.5
-      C 34.5,31.3 36,28.8 36,26 C 36,22 33.5,18.5 30,17
-      C 30,14 28,11 25,10 C 25,8 23.8,7 22.5,7 C 21.2,7 20,8 20,10
-      C 17,11 15,14 15,17 C 11.5,18.5 9,22 9,26 Z
-      M 22.5,7 C 23.3,7 24,7.7 24,8.5 C 24,9.3 23.3,10 22.5,10 C 21.7,10 21,9.3 21,8.5 C 21,7.7 21.7,7 22.5,7 Z
-      M 13,17 C 14.1,17 15,17.9 15,19 C 15,20.1 14.1,21 13,21 C 11.9,21 11,20.1 11,19 C 11,17.9 11.9,17 13,17 Z
-      M 32,17 C 33.1,17 34,17.9 34,19 C 34,20.1 33.1,21 32,21 C 30.9,21 30,20.1 30,19 C 30,17.9 30.9,17 32,17 Z
-      M 9,39 L 36,39 L 36,36 L 9,36 Z`,
-  // King
-  K: `M 22.5,11.63 L 22.5,6 M 20,8 L 25,8
-      M 22.5,25 C 22.5,25 27,17.5 25.5,14.5 C 25.5,14.5 24.5,12 22.5,12 C 20.5,12 19.5,14.5 19.5,14.5 C 18,17.5 22.5,25 22.5,25 Z
-      M 12,36 C 12,36 12,32 13,30 C 14,28 16,27 18,26.5 C 20,26 22.5,26 22.5,26 C 22.5,26 25,26 27,26.5 C 29,27 31,28 32,30 C 33,32 33,36 33,36 Z
-      M 11,38 L 34,38 L 34,36 L 11,36 Z
-      M 34,14 L 34,11 L 11,11 L 11,14 Z`,
+// ── Piece SVGs — Lichess CBurnett set, viewBox 0 0 45 45 ─────────────────────
+const PIECE_SVG = {
+  "b": `<g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1.65.54 3 2-.68.97-1.65.99-3 .5-3.39-.97-10.11.46-13.5-1-3.39 1.46-10.11.03-13.5 1-1.354.49-2.323.47-3-.5 1.354-1.94 3-2 3-2zm6-4c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2zM25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0z" fill="#000" stroke-linecap="butt"/><path d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5" stroke="#fff" stroke-linejoin="miter"/></g>`,
+  "k": `<g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22.5 11.63V6" stroke-linejoin="miter"/><path d="M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5" fill="#000" stroke-linecap="butt" stroke-linejoin="miter"/><path d="M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-3.5-7.5-13-10.5-16-4-3 6 5 10 5 10V37z" fill="#000"/><path d="M20 8h5" stroke-linejoin="miter"/><path d="M32 29.5s8.5-4 6.03-9.65C34.15 14 25 18 22.5 24.5l.01 2.1-.01-2.1C20 18 9.906 14 6.997 19.85c-2.497 5.65 4.853 9 4.853 9M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0" stroke="#fff"/></g>`,
+  "n": `<g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22,10C32.5,11 38.5,18 38,39L15,39C15,30 25,32.5 23,18" style="fill:#000;stroke:#000"/><path d="M24,18C24.38,20.91 18.45,25.37 16,27C13,29 13.18,31.34 11,31C9.958,30.06 12.41,27.96 11,28C10,28 11.19,29.23 10,30C9,30 5.997,31 6,26C6,24 12,14 12,14C12,14 13.89,12.1 14,10.5C13.27,9.506 13.5,8.5 13.5,7.5C14.5,6.5 16.5,10 16.5,10L18.5,10C18.5,10 19.28,8.008 21,7C22,7 22,10 22,10" style="fill:#000;stroke:#000"/><path d="M9.5 25.5A0.5 0.5 0 1 1 8.5,25.5A0.5 0.5 0 1 1 9.5 25.5z" style="fill:#ececec;stroke:#ececec"/><path d="M15 15.5A0.5 1.5 0 1 1 14,15.5A0.5 1.5 0 1 1 15 15.5z" transform="matrix(0.866,0.5,-0.5,0.866,9.693,-5.173)" style="fill:#ececec;stroke:#ececec"/></g>`,
+  "p": `<g><path d="M22.5 9c-2.21 0-4 1.79-4 4 0 .89.29 1.71.78 2.38C17.33 16.5 16 18.59 16 21c0 2.03.94 3.84 2.41 5.03-3 1.06-7.41 5.55-7.41 13.47h23c0-7.92-4.41-12.41-7.41-13.47 1.47-1.19 2.41-3 2.41-5.03 0-2.41-1.33-4.5-3.28-5.62.49-.67.78-1.49.78-2.38 0-2.21-1.79-4-4-4z" fill="#000" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></g>`,
+  "q": `<g fill="#000" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.75" stroke="none"/><circle cx="14" cy="9" r="2.75" stroke="none"/><circle cx="22.5" cy="8" r="2.75" stroke="none"/><circle cx="31" cy="9" r="2.75" stroke="none"/><circle cx="39" cy="12" r="2.75" stroke="none"/><path d="M9 26c8.5-1.5 21-1.5 27 0l2.5-12.5L31 25l-.3-14.1-5.2 13.6-3-14.5-3 14.5-5.2-13.6L14 25 6.5 13.5 9 26zM9 26c0 2 1.5 2 2.5 4 1 1.5 1 1 .5 3.5-1.5 1-1.5 2.5-1.5 2.5-1.5 1.5.5 2.5.5 2.5 6.5 1 16.5 1 23 0 0 0 1.5-1 0-2.5 0 0 .5-1.5-1-2.5-.5-2.5-.5-2 .5-3.5 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-27 0z" stroke-linecap="butt"/><path d="M11 38.5a35 35 1 0 0 23 0" fill="none" stroke-linecap="butt"/><path d="M11 29a35 35 1 0 1 23 0M12.5 31.5h20M11.5 34.5a35 35 1 0 0 22 0M10.5 37.5a35 35 1 0 0 24 0" fill="none" stroke="#fff"/></g>`,
+  "r": `<g fill="#000" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 39h27v-3H9v3zM12.5 32l1.5-2.5h17l1.5 2.5h-20zM12 36v-4h21v4H12z" stroke-linecap="butt"/><path d="M14 29.5v-13h17v13H14z" stroke-linecap="butt" stroke-linejoin="miter"/><path d="M14 16.5L11 14h23l-3 2.5H14zM11 14V9h4v2h5V9h5v2h5V9h4v5H11z" stroke-linecap="butt"/><path d="M12 35.5h21M13 31.5h19M14 29.5h17M14 16.5h17M11 14h23" fill="none" stroke="#fff" stroke-width="1" stroke-linejoin="miter"/></g>`,
+  "B": `<g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g fill="#fff" stroke-linecap="butt"><path d="M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1.65.54 3 2-.68.97-1.65.99-3 .5-3.39-.97-10.11.46-13.5-1-3.39 1.46-10.11.03-13.5 1-1.354.49-2.323.47-3-.5 1.354-1.94 3-2 3-2zM15 32c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2zM25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0z"/></g><path d="M17.5 26h10M15 30h15m-7.5-14.5v5M20 18h5" stroke-linejoin="miter"/></g>`,
+  "K": `<g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22.5 11.63V6M20 8h5" stroke-linejoin="miter"/><path d="M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5" fill="#fff" stroke-linecap="butt" stroke-linejoin="miter"/><path d="M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-3.5-7.5-13-10.5-16-4-3 6 5 10 5 10V37z" fill="#fff"/><path d="M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0"/></g>`,
+  "N": `<g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22,10C32.5,11 38.5,18 38,39L15,39C15,30 25,32.5 23,18" style="fill:#fff;stroke:#000"/><path d="M24,18C24.38,20.91 18.45,25.37 16,27C13,29 13.18,31.34 11,31C9.958,30.06 12.41,27.96 11,28C10,28 11.19,29.23 10,30C9,30 5.997,31 6,26C6,24 12,14 12,14C12,14 13.89,12.1 14,10.5C13.27,9.506 13.5,8.5 13.5,7.5C14.5,6.5 16.5,10 16.5,10L18.5,10C18.5,10 19.28,8.008 21,7C22,7 22,10 22,10" style="fill:#fff;stroke:#000"/><path d="M9.5 25.5A0.5 0.5 0 1 1 8.5,25.5A0.5 0.5 0 1 1 9.5 25.5z" style="fill:#000;stroke:#000"/><path d="M15 15.5A0.5 1.5 0 1 1 14,15.5A0.5 1.5 0 1 1 15 15.5z" transform="matrix(0.866,0.5,-0.5,0.866,9.693,-5.173)" style="fill:#000;stroke:#000"/></g>`,
+  "P": `<g><path d="M22.5 9c-2.21 0-4 1.79-4 4 0 .89.29 1.71.78 2.38C17.33 16.5 16 18.59 16 21c0 2.03.94 3.84 2.41 5.03-3 1.06-7.41 5.55-7.41 13.47h23c0-7.92-4.41-12.41-7.41-13.47 1.47-1.19 2.41-3 2.41-5.03 0-2.41-1.33-4.5-3.28-5.62.49-.67.78-1.49.78-2.38 0-2.21-1.79-4-4-4z" fill="#fff" stroke="#000" stroke-width="1.5" stroke-linecap="round"/></g>`,
+  "Q": `<g fill="#fff" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12a2 2 0 1 1-4 0 2 2 0 1 1 4 0zM24.5 7.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0zM41 12a2 2 0 1 1-4 0 2 2 0 1 1 4 0zM16 8.5a2 2 0 1 1-4 0 2 2 0 1 1 4 0zM33 9a2 2 0 1 1-4 0 2 2 0 1 1 4 0z"/><path d="M9 26c8.5-1.5 21-1.5 27 0l2-12-7 11V11l-5.5 13.5-3-15-3 15-5.5-14V25L7 14l2 12zM9 26c0 2 1.5 2 2.5 4 1 1.5 1 1 .5 3.5-1.5 1-1.5 2.5-1.5 2.5-1.5 1.5.5 2.5.5 2.5 6.5 1 16.5 1 23 0 0 0 1.5-1 0-2.5 0 0 .5-1.5-1-2.5-.5-2.5-.5-2 .5-3.5 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-27 0z" stroke-linecap="butt"/><path d="M11.5 30c3.5-1 18.5-1 22 0M12 33.5c6-1 15-1 21 0" fill="none"/></g>`,
+  "R": `<g fill="#fff" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 39h27v-3H9v3zM12 36v-4h21v4H12zM11 14V9h4v2h5V9h5v2h5V9h4v5" stroke-linecap="butt"/><path d="M34 14l-3 3H14l-3-3"/><path d="M31 17v12.5H14V17" stroke-linecap="butt" stroke-linejoin="miter"/><path d="M31 29.5l1.5 2.5h-20l1.5-2.5"/><path d="M11 14h23" fill="none" stroke-linejoin="miter"/></g>`,
 };
+
+// Cache rendered piece images (built once on first use)
+const pieceImageCache = {};
+async function getPieceImage(piece) {
+  if (pieceImageCache[piece]) return pieceImageCache[piece];
+  const inner = PIECE_SVG[piece];
+  if (!inner) return null;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45" width="45" height="45">${inner}</svg>`;
+  const img = await loadImage(Buffer.from(svg));
+  pieceImageCache[piece] = img;
+  return img;
+}
 
 const LIGHT = "#F0D9B5";
 const DARK  = "#B58863";
 const SQ    = 72;
-const PAD   = 24;
+const PAD   = 20;
 const SIZE  = SQ * 8 + PAD * 2;
-
-// Scale factor: piece paths are on 45x45, we need SQ x SQ
-const SCALE = SQ / 45;
-
-function drawPiece(ctx, piece, x, y) {
-  const isWhite = piece === piece.toUpperCase();
-  const key     = piece.toUpperCase();
-  const pathStr = PIECE_PATHS[key];
-  if (!pathStr) return;
-
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(SCALE, SCALE);
-
-  const path = new Path2D(pathStr);
-
-  ctx.lineWidth = 1.5;
-  ctx.fillStyle = isWhite ? "#fff" : "#333";
-  ctx.fill(path);
-  ctx.strokeStyle = "#000";
-  ctx.stroke(path);
-
-  ctx.restore();
-}
 
 async function renderBoard(fen, perspective = "white") {
   const canvas  = createCanvas(SIZE, SIZE);
   const ctx     = canvas.getContext("2d");
   const flipped = perspective === "black";
 
-  // Background border
+  // Dark border
   ctx.fillStyle = "#2b2b2b";
   ctx.fillRect(0, 0, SIZE, SIZE);
 
-  // Parse FEN
+  // Parse FEN position
   const position = fen.split(" ")[0];
-  const rows     = position.split("/");
-  const board    = rows.map(row => {
+  const board = position.split("/").map(row => {
     const cells = [];
     for (const ch of row) {
-      if (/\d/.test(ch)) {
-        for (let i = 0; i < parseInt(ch); i++) cells.push(null);
-      } else {
-        cells.push(ch);
-      }
+      if (/\d/.test(ch)) for (let i = 0; i < +ch; i++) cells.push(null);
+      else cells.push(ch);
     }
     return cells;
   });
@@ -115,13 +71,32 @@ async function renderBoard(fen, perspective = "white") {
   // Draw squares
   for (let r = 0; r < 8; r++) {
     for (let f = 0; f < 8; f++) {
-      const dispR = flipped ? 7 - r : r;
-      const dispF = flipped ? 7 - f : f;
-      const x = PAD + dispF * SQ;
-      const y = PAD + dispR * SQ;
+      const dr = flipped ? 7 - r : r;
+      const df = flipped ? 7 - f : f;
       ctx.fillStyle = (r + f) % 2 === 0 ? LIGHT : DARK;
-      ctx.fillRect(x, y, SQ, SQ);
+      ctx.fillRect(PAD + df * SQ, PAD + dr * SQ, SQ, SQ);
     }
+  }
+
+  // Coordinate labels — drawn ON the squares (Lichess style)
+  ctx.font         = "bold 11px sans-serif";
+  ctx.textBaseline = "top";
+  ctx.textAlign    = "left";
+  for (let r = 0; r < 8; r++) {
+    const rank = flipped ? r + 1 : 8 - r;
+    const dr   = r; // display row index
+    // rank label top-left of the square on file a
+    ctx.fillStyle = dr % 2 === 0 ? DARK : LIGHT;
+    ctx.fillText(String(rank), PAD + 2, PAD + dr * SQ + 2);
+  }
+  ctx.textBaseline = "bottom";
+  ctx.textAlign    = "right";
+  const files = flipped ? "hgfedcba" : "abcdefgh";
+  for (let f = 0; f < 8; f++) {
+    // file label bottom-right of the square on rank 1
+    const df = f;
+    ctx.fillStyle = df % 2 === 0 ? LIGHT : DARK;
+    ctx.fillText(files[f], PAD + (df + 1) * SQ - 2, PAD + 8 * SQ - 2);
   }
 
   // Draw pieces
@@ -129,26 +104,11 @@ async function renderBoard(fen, perspective = "white") {
     for (let f = 0; f < 8; f++) {
       const piece = board[r][f];
       if (!piece) continue;
-      const dispR = flipped ? 7 - r : r;
-      const dispF = flipped ? 7 - f : f;
-      const x = PAD + dispF * SQ;
-      const y = PAD + dispR * SQ;
-      drawPiece(ctx, piece, x, y);
+      const dr  = flipped ? 7 - r : r;
+      const df  = flipped ? 7 - f : f;
+      const img = await getPieceImage(piece);
+      if (img) ctx.drawImage(img, PAD + df * SQ, PAD + dr * SQ, SQ, SQ);
     }
-  }
-
-  // Coordinate labels
-  ctx.fillStyle   = "#999";
-  ctx.font        = "bold 11px sans-serif";
-  ctx.textAlign   = "center";
-  ctx.textBaseline = "middle";
-  const files = flipped ? "hgfedcba" : "abcdefgh";
-  for (let i = 0; i < 8; i++) {
-    const label = flipped ? i + 1 : 8 - i;
-    const yPos  = PAD + i * SQ + SQ / 2;
-    ctx.fillText(String(label), PAD / 2, yPos);
-    const xPos  = PAD + i * SQ + SQ / 2;
-    ctx.fillText(files[i], xPos, SIZE - PAD / 2);
   }
 
   return canvas.toBuffer("image/png");
@@ -196,7 +156,6 @@ async function main() {
 
   await ensureCollections();
 
-  // ── DB helpers ──────────────────────────────────────────────────────────────
   async function getOrCreateUser(telegramId, username, firstName) {
     const id = String(telegramId);
     try {
@@ -230,7 +189,6 @@ async function main() {
     } catch { return `User ${userId}`; }
   }
 
-  // ── Move logic ──────────────────────────────────────────────────────────────
   async function processMove(ctx, userId, moveStr) {
     log('INFO', `MOVE from ${userId}: ${moveStr}`);
     const game = await getActiveGame(userId);
@@ -281,10 +239,7 @@ async function main() {
     const myCaption  = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...");
 
     const myBoard = await renderBoard(newFen, myColor);
-    await ctx.replyWithPhoto(new InputFile(myBoard, "board.png"), {
-      caption: myCaption,
-      parse_mode: "HTML",
-    });
+    await ctx.replyWithPhoto(new InputFile(myBoard, "board.png"), { caption: myCaption, parse_mode: "HTML" });
 
     if (opponentId) {
       const oppStatus = isOver
@@ -293,20 +248,19 @@ async function main() {
       try {
         const oppBoard = await renderBoard(newFen, oppColor);
         await bot.api.sendPhoto(opponentId, new InputFile(oppBoard, "board.png"), {
-          caption: moveInfo + oppStatus,
-          parse_mode: "HTML",
+          caption: moveInfo + oppStatus, parse_mode: "HTML",
         });
       } catch {}
     }
 
     if (isOver) {
+   
       const endMsg = chess.in_checkmate() ? `🏆 Победитель: ${moverName}!` : `🤝 ${statusTxt}`;
       await ctx.reply(endMsg);
       if (opponentId) try { await bot.api.sendMessage(opponentId, endMsg); } catch {}
     }
   }
 
-  // ── Join helper ─────────────────────────────────────────────────────────────
   async function doJoinGame(ctx, gameId, userId) {
     const game = await getGameById(gameId);
     if (!game)                        return ctx.reply("❌ Игра не найдена.");
@@ -314,7 +268,6 @@ async function main() {
     if (game.player_white === userId) return ctx.reply("❌ Нельзя играть с собой.");
 
     await pb.collection("chess_games").update(gameId, { player_black: userId, status: "active" }, { requestKey: null });
-
     const updated   = await getGameById(gameId);
     const whiteName = await getPlayerName(updated.player_white);
     const blackName = await getPlayerName(updated.player_black);
@@ -339,15 +292,10 @@ async function main() {
     log('INFO', `CMD /start from ${ctx.from.id}`);
     await getOrCreateUser(ctx.from.id, ctx.from.username, ctx.from.first_name);
     await ctx.reply(
-      `♟ <b>Chess Bot</b>\n\n` +
-      `Играйте в шахматы прямо в Telegram!\n\n` +
-      `<b>Команды:</b>\n` +
-      `/newgame — создать новую игру\n` +
-      `/join &lt;ID&gt; — присоединиться к игре\n` +
-      `/move e2e4 — сделать ход\n` +
-      `/board — показать текущую доску\n` +
-      `/resign — сдаться\n` +
-      `/games — список открытых игр\n\n` +
+      `♟ <b>Chess Bot</b>\n\nИграйте в шахматы прямо в Telegram!\n\n<b>Команды:</b>\n` +
+      `/newgame — создать новую игру\n/join &lt;ID&gt; — присоединиться к игре\n` +
+      `/move e2e4 — сделать ход\n/board — показать текущую доску\n` +
+      `/resign — сдаться\n/games — список открытых игр\n\n` +
       `💡 Во время игры пишите ход прямо в чат: <code>e2e4</code>\n` +
       `💬 Любой другой текст пересылается сопернику`,
       { parse_mode: "HTML" }
@@ -368,8 +316,7 @@ async function main() {
     );
     const kb = new InlineKeyboard().text("✅ Присоединиться", `join_${game.id}`);
     await ctx.reply(
-      `♟ <b>Новая игра создана!</b>\n\nВы играете белыми ⬜\n\n` +
-      `ID игры: <code>${game.id}</code>\n\n` +
+      `♟ <b>Новая игра создана!</b>\n\nВы играете белыми ⬜\n\nID игры: <code>${game.id}</code>\n\n` +
       `Отправьте другу: <code>/join ${game.id}</code>\n\nИли пусть нажмёт кнопку 👇`,
       { parse_mode: "HTML", reply_markup: kb }
     );
@@ -383,9 +330,7 @@ async function main() {
       const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
       if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
       const kb = new InlineKeyboard();
-      for (const g of res.items) {
-        kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
-      }
+      for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
       return ctx.reply("🎮 Открытые игры:", { reply_markup: kb });
     }
     await doJoinGame(ctx, gameId, String(ctx.from.id));
@@ -408,8 +353,7 @@ async function main() {
     const blackName = game.player_black ? await getPlayerName(game.player_black) : "ожидание...";
     const turnName  = game.turn === "white" ? whiteName : blackName;
     const statusTxt = gameStatusText(chess);
-    const caption   =
-      `♟ <b>Текущая позиция</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
+    const caption   = `♟ <b>Текущая позиция</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
       (statusTxt ? statusTxt : `🎯 Ход: ${turnName} (${game.turn === "white" ? "⬜" : "⬛"})`);
     const board = await renderBoard(game.fen, isWhite ? "white" : "black");
     await ctx.replyWithPhoto(new InputFile(board, "board.png"), { caption, parse_mode: "HTML" });
@@ -435,13 +379,10 @@ async function main() {
     const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
     if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
     const kb = new InlineKeyboard();
-    for (const g of res.items) {
-      kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
-    }
+    for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
     await ctx.reply(`🎮 Открытые игры (${res.items.length}):`, { reply_markup: kb });
   });
 
-  // ── Callbacks ───────────────────────────────────────────────────────────────
   bot.callbackQuery(/^join_(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await getOrCreateUser(ctx.from.id, ctx.from.username, ctx.from.first_name);
@@ -459,49 +400,36 @@ async function main() {
     const blackName = game.player_black ? await getPlayerName(game.player_black) : "ожидание...";
     const statusTxt = gameStatusText(chess);
     const turnName  = game.turn === "white" ? whiteName : blackName;
-    const caption   =
-      `♟ <b>Доска</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
+    const caption   = `♟ <b>Доска</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
       (statusTxt ? statusTxt : `🎯 Ход: ${turnName}`);
     const board = await renderBoard(game.fen, isWhite ? "white" : "black");
     await ctx.replyWithPhoto(new InputFile(board, "board.png"), { caption, parse_mode: "HTML" });
   });
 
-  // ── Text messages ───────────────────────────────────────────────────────────
   bot.on("message:text", async (ctx) => {
     const text   = ctx.message.text.trim();
     const userId = String(ctx.from.id);
     log('INFO', `MSG from ${userId}: "${text.slice(0, 40)}"`);
-
     if (text.startsWith("/")) return;
-
     const game = await getActiveGame(userId);
     if (!game || game.status !== "active") return;
-
     const isWhite    = game.player_white === userId;
     const opponentId = isWhite ? game.player_black : game.player_white;
-
-    if (looksLikeMove(text)) {
-      return processMove(ctx, userId, text);
-    }
-
+    if (looksLikeMove(text)) return processMove(ctx, userId, text);
     if (opponentId) {
       const myName = await getPlayerName(userId);
       try {
         await bot.api.sendMessage(opponentId, `💬 <b>${myName}:</b> ${text}`, { parse_mode: "HTML" });
         await ctx.reply("✉️ Отправлено сопернику");
-      } catch {
-        await ctx.reply("❌ Не удалось отправить сообщение сопернику.");
-      }
+      } catch { await ctx.reply("❌ Не удалось отправить сообщение сопернику."); }
     }
   });
 
-  // ── Error handler ───────────────────────────────────────────────────────────
   bot.catch((err) => {
     log('ERROR', `Handler error: ${err.message}`, String(err.error));
     try { err.ctx.reply("❌ Внутренняя ошибка.").catch(() => {}); } catch {}
   });
 
-  // ── Start polling ───────────────────────────────────────────────────────────
   log('INFO', 'Устанавливаем команды бота...');
   try {
     await bot.api.setMyCommands([
@@ -514,23 +442,18 @@ async function main() {
       { command: "games",   description: "Список открытых игр" },
     ]);
     log('INFO', 'Команды установлены');
-  } catch (err) {
-    log('ERROR', 'Ошибка setMyCommands', err.message);
-  }
+  } catch (err) { log('ERROR', 'Ошибка setMyCommands', err.message); }
 
   log('INFO', 'Удаляем вебхук...');
   try {
     await bot.api.deleteWebhook({ drop_pending_updates: false });
     log('INFO', 'Вебхук удалён');
-  } catch (err) {
-    log('WARN', 'deleteWebhook error', err.message);
-  }
+  } catch (err) { log('WARN', 'deleteWebhook error', err.message); }
 
   log('INFO', 'Запускаем polling...');
   await bot.start();
 }
 
-// ── Collections ──────────────────────────────────────────────────────────────
 async function ensureCollections() {
   const cols = [
     { name: "chess_users", type: "base", fields: [
@@ -563,18 +486,12 @@ async function ensureCollections() {
         try {
           await pb.collections.create(col);
           log('INFO', `Создана коллекция '${col.name}'`);
-        } catch (e) {
-          log('ERROR', `Не удалось создать '${col.name}'`, e.message);
-        }
+        } catch (e) { log('ERROR', `Не удалось создать '${col.name}'`, e.message); }
       }
     }
   }
 }
 
-main().catch(err => {
-  log('CRITICAL', 'Критическая ошибка', err);
-  process.exit(1);
-});
-
+main().catch(err => { log('CRITICAL', 'Критическая ошибка', err); process.exit(1); });
 process.on('SIGINT',  () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
