@@ -4,7 +4,7 @@ name: Chess Telegram Bot
 tagline: Play chess with friends via Telegram
 icon: https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/icon.svg
 category: social
-version: "1.0.7"
+version: "1.0.8"
 description: >-
   Telegram bot for playing chess with friends.
 
@@ -26,7 +26,7 @@ support: https://github.com/pitcentr/chess-telegram-bot/issues
 gallery:
   - https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/screenshots/screenshot1.svg
 releaseNotes: >-
-  v1.0.7: Stability improvements and bug fixes.
+  v1.0.8: Wider board display. Improved move detection from plain text.
 dependencies: []
 path: ""
 defaultUsername: ""

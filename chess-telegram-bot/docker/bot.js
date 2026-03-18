@@ -27,17 +27,18 @@ function renderBoard(fen, perspective = "white") {
   const rows    = isWhite ? [...board].reverse() : [...board];
   const labels  = isWhite ? FILES : [...FILES].reverse();
 
-  let out = "<pre>\n  " + labels.join(" ") + "\n";
+  // Двойной пробел между клетками — доска шире и читаемее
+  let out = "<pre>\n   " + labels.join("  ") + "\n";
   rows.forEach((row, i) => {
-    const rank        = isWhite ? 8 - i : i + 1;
-    const displayRow  = isWhite ? row : [...row].reverse();
-    const cells       = displayRow.map(sq => {
+    const rank       = isWhite ? 8 - i : i + 1;
+    const displayRow = isWhite ? row : [...row].reverse();
+    const cells      = displayRow.map(sq => {
       if (!sq) return "·";
       return PIECE_MAP[sq.color === "w" ? sq.type.toUpperCase() : sq.type] || "?";
     });
-    out += `${rank} ${cells.join(" ")} ${rank}\n`;
+    out += `${rank}  ${cells.join("  ")}  ${rank}\n`;
   });
-  out += "  " + labels.join(" ") + "\n</pre>";
+  out += "   " + labels.join("  ") + "\n</pre>";
   return out;
 }
 
@@ -52,10 +53,15 @@ function gameStatusText(chess) {
 
 function looksLikeMove(text) {
   const t = text.trim().toLowerCase();
+  // Рокировки
   if (t === "o-o-o" || t === "0-0-0") return true;
   if (t === "o-o"   || t === "0-0")   return true;
-  if (/^[a-h][1-8]-?[a-h][1-8][qrbn]?$/.test(t)) return true;
-  if (/^[NBRQK]?[a-h]?[1-8]?x?[a-h][1-8][+#]?$/.test(text.trim())) return true;
+  // Формат e2e4 / e2-e4 / e2e4q — любые координаты (валидность проверит chess.js)
+  if (/^[a-h]\d-?[a-h]\d[qrbn]?$/.test(t)) return true;
+  // SAN: Nf3, Bxe5, exd5, Qd1+
+  if (/^[NBRQK][a-h]?[1-8]?x?[a-h][1-8][+#]?$/.test(text.trim())) return true;
+  // Пешечный ход SAN: e4, exd5
+  if (/^[a-h]x?[a-h]?[1-8][+#]?$/.test(t)) return true;
   return false;
 }
 
