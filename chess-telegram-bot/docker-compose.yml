@@ -1,27 +1,14 @@
 version: "3.7"
 
 services:
-  pocketbase:
-    image: ghcr.io/muchobien/pocketbase:latest
-    restart: unless-stopped
-    volumes:
-      - ${APP_DATA_DIR}/pocketbase:/pb_data
-    ports:
-      - "8090:8090"
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8090/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  bot:
+  app:
     build: ./docker
+    user: "1000:1000"
+    init: true
     restart: unless-stopped
-    depends_on:
-      pocketbase:
-        condition: service_healthy
+    stop_grace_period: 1m
     environment:
-      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
-      POCKETBASE_URL: "http://pocketbase:8090"
-      POCKETBASE_ADMIN_EMAIL: "${POCKETBASE_ADMIN_EMAIL:-admin@chess.local}"
-      POCKETBASE_ADMIN_PASSWORD: "${POCKETBASE_ADMIN_PASSWORD:-changeme123}"
+      TG_TOKEN: ""
+      PB_URL: "http://pocketbase_app_1:8090"
+      PB_ADMIN: ""
+      PB_PASSWORD: ""
