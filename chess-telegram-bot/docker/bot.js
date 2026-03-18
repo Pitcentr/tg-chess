@@ -2,7 +2,18 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { Chess } from "chess.js";
 import PocketBase from "pocketbase";
 import dotenv from "dotenv";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage, GlobalFonts } from "@napi-rs/canvas";
+import { existsSync } from "fs";
+
+// Register system font for coordinate labels
+const FONT_PATHS = [
+  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+  "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+];
+for (const p of FONT_PATHS) {
+  if (existsSync(p)) { GlobalFonts.registerFromPath(p, "DejaVu"); break; }
+}
+const LABEL_FONT = "bold 18px DejaVu, sans-serif";
 
 dotenv.config();
 
@@ -47,7 +58,7 @@ const LIGHT  = "#F0D9B5";
 const DARK   = "#B58863";
 const BORDER = "#2b2b2b";
 const SQ     = 90;   // square size in px (2× = retina-ready)
-const PAD    = 30;   // padding for coordinate labels
+const PAD    = 36;   // padding for coordinate labels
 const SIZE   = SQ * 8 + PAD * 2;
 
 async function renderBoard(fen, perspective = "white") {
@@ -82,15 +93,15 @@ async function renderBoard(fen, perspective = "white") {
 
   // ── Coordinate labels in the PAD border ──────────────────────────────────
   const files = flipped ? "hgfedcba" : "abcdefgh";
-  ctx.font         = "bold 16px sans-serif";
+  ctx.font         = LABEL_FONT;
   ctx.textBaseline = "middle";
   ctx.textAlign    = "center";
+  ctx.fillStyle    = "#d0d0d0";
 
   // Rank numbers — left and right PAD strips
   for (let r = 0; r < 8; r++) {
     const rank = String(flipped ? r + 1 : 8 - r);
     const y    = PAD + r * SQ + SQ / 2;
-    ctx.fillStyle = "#ccc";
     ctx.fillText(rank, PAD / 2, y);
     ctx.fillText(rank, SIZE - PAD / 2, y);
   }
@@ -98,7 +109,6 @@ async function renderBoard(fen, perspective = "white") {
   // File letters — top and bottom PAD strips
   for (let f = 0; f < 8; f++) {
     const x = PAD + f * SQ + SQ / 2;
-    ctx.fillStyle = "#ccc";
     ctx.fillText(files[f], x, PAD / 2);
     ctx.fillText(files[f], x, SIZE - PAD / 2);
   }
