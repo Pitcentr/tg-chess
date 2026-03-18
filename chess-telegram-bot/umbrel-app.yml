@@ -1,0 +1,30 @@
+manifestVersion: 1
+id: chess-telegram-bot
+name: Chess Telegram Bot
+tagline: Play chess with friends via Telegram
+icon: https://raw.githubusercontent.com/pitcentr/telegram-vault-store/main/vault-telegram-vault/metadata/icon.svg
+category: social
+version: "1.0.0"
+description: >-
+  A self-hosted Telegram bot for playing chess with friends.
+
+
+  Features: two-player games, move validation, ASCII board display, check/checkmate detection.
+
+
+  All game data stored in PocketBase. Requires a Telegram Bot Token.
+
+developer: Self Hosted
+website: https://github.com/pitcentr/chess-telegram-bot
+submitter: Self
+submission: https://github.com/pitcentr/chess-telegram-bot
+repo: https://github.com/pitcentr/chess-telegram-bot
+support: https://github.com/pitcentr/chess-telegram-bot/issues
+gallery: []
+releaseNotes: >-
+  v1.0.0: Initial release with full chess gameplay via Telegram.
+dependencies: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+torOnly: false

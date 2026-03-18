@@ -1,0 +1,12 @@
+{
+  "name": "chess-telegram-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "bot.js",
+  "dependencies": {
+    "chess.js": "^1.0.0",
+    "grammy": "^1.21.1",
+    "pocketbase": "^0.21.5",
+    "dotenv": "^16.4.5"
+  }
+}
