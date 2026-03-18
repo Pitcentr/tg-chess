@@ -1,9 +1,13 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { Chess } from "chess.js";
 import PocketBase from "pocketbase";
 import dotenv from "dotenv";
+import { createRequire } from "module";
 
 dotenv.config();
+
+const require = createRequire(import.meta.url);
+const ChessImageGenerator = require("chess-image-generator");
 
 const REQUIRED_ENV = ['TG_TOKEN', 'PB_URL', 'PB_ADMIN', 'PB_PASSWORD'];
 
@@ -13,33 +17,17 @@ function log(level, message, data = null) {
   if (data) console.dir(data, { depth: null });
 }
 
-// ── Доска ────────────────────────────────────────────────────────────────────
-const PIECE_MAP = {
-  P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔",
-  p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
-};
-const FILES = ["a","b","c","d","e","f","g","h"];
-
-function renderBoard(fen, perspective = "white") {
-  const chess   = new Chess(fen);
-  const board   = chess.board();
-  const isWhite = perspective === "white";
-  const rows    = isWhite ? [...board].reverse() : [...board];
-  const labels  = isWhite ? FILES : [...FILES].reverse();
-
-  // Двойной пробел между клетками — доска шире и читаемее
-  let out = "<pre>\n   " + labels.join("  ") + "\n";
-  rows.forEach((row, i) => {
-    const rank       = isWhite ? 8 - i : i + 1;
-    const displayRow = isWhite ? row : [...row].reverse();
-    const cells      = displayRow.map(sq => {
-      if (!sq) return "·";
-      return PIECE_MAP[sq.color === "w" ? sq.type.toUpperCase() : sq.type] || "?";
-    });
-    out += `${rank}  ${cells.join("  ")}  ${rank}\n`;
+// ── Board PNG ─────────────────────────────────────────────────────────────────
+async function renderBoard(fen, perspective = "white") {
+  const generator = new ChessImageGenerator({
+    size: 512,
+    light:  "rgb(240, 217, 181)",
+    dark:   "rgb(181, 136, 99)",
+    style:  "merida",
+    flipped: perspective === "black",
   });
-  out += "   " + labels.join("  ") + "\n</pre>";
-  return out;
+  await generator.loadFEN(fen);
+  return await generator.generateBuffer();
 }
 
 // chess.js v0.13 API
@@ -53,14 +41,10 @@ function gameStatusText(chess) {
 
 function looksLikeMove(text) {
   const t = text.trim().toLowerCase();
-  // Рокировки
   if (t === "o-o-o" || t === "0-0-0") return true;
   if (t === "o-o"   || t === "0-0")   return true;
-  // Формат e2e4 / e2-e4 / e2e4q — любые координаты (валидность проверит chess.js)
   if (/^[a-h]\d-?[a-h]\d[qrbn]?$/.test(t)) return true;
-  // SAN: Nf3, Bxe5, exd5, Qd1+
   if (/^[NBRQK][a-h]?[1-8]?x?[a-h][1-8][+#]?$/.test(text.trim())) return true;
-  // Пешечный ход SAN: e4, exd5
   if (/^[a-h]x?[a-h]?[1-8][+#]?$/.test(t)) return true;
   return false;
 }
@@ -170,22 +154,26 @@ async function main() {
     const opponentId = isWhite ? game.player_black : game.player_white;
     const oppColor   = isWhite ? "black" : "white";
     const moveInfo   = `✅ Ход: <code>${result.san}</code> (${moverName})`;
+    const myCaption  = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...");
 
-    await ctx.reply(
-      `${moveInfo}\n\n` + renderBoard(newFen, myColor) + "\n" +
-      (statusTxt ? `\n${statusTxt}` : "\n⏳ Ждём хода соперника..."),
-      { parse_mode: "HTML" }
-    );
+    // Send board as photo to mover
+    const myBoard = await renderBoard(newFen, myColor);
+    await ctx.replyWithPhoto(new InputFile(myBoard, "board.png"), {
+      caption: myCaption,
+      parse_mode: "HTML",
+    });
 
+    // Notify opponent
     if (opponentId) {
       const oppStatus = isOver
-        ? (chess.in_checkmate() ? `\n♟ Шах и мат! Победили ${moverName}!` : `\n🤝 ${statusTxt}`)
-        : (chess.in_check() ? "\n⚠️ Шах! Ваш ход." : "\n🎯 Ваш ход!");
+        ? (chess.in_checkmate() ? `\n\n♟ Шах и мат! Победили ${moverName}!` : `\n\n🤝 ${statusTxt}`)
+        : (chess.in_check() ? "\n\n⚠️ Шах! Ваш ход." : "\n\n🎯 Ваш ход!");
       try {
-        await bot.api.sendMessage(opponentId,
-          `${moveInfo}\n\n` + renderBoard(newFen, oppColor) + oppStatus,
-          { parse_mode: "HTML" }
-        );
+        const oppBoard = await renderBoard(newFen, oppColor);
+        await bot.api.sendPhoto(opponentId, new InputFile(oppBoard, "board.png"), {
+          caption: moveInfo + oppStatus,
+          parse_mode: "HTML",
+        });
       } catch {}
     }
 
@@ -209,20 +197,21 @@ async function main() {
     const whiteName = await getPlayerName(updated.player_white);
     const blackName = await getPlayerName(updated.player_black);
 
+    // Notify white player
     try {
-      await bot.api.sendMessage(updated.player_white,
-        `🎉 <b>${blackName}</b> присоединился!\n\nВы ходите первыми ⬜\n\n` +
-        renderBoard(updated.fen, "white") + "\n\n🎯 Ваш ход!",
-        { parse_mode: "HTML" }
-      );
+      const whiteBoard = await renderBoard(updated.fen, "white");
+      await bot.api.sendPhoto(updated.player_white, new InputFile(whiteBoard, "board.png"), {
+        caption: `🎉 <b>${blackName}</b> присоединился!\n\nВы ходите первыми ⬜\n\n🎯 Ваш ход!`,
+        parse_mode: "HTML",
+      });
     } catch {}
 
-    await ctx.reply(
-      `♟ <b>Игра началась!</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
-      renderBoard(updated.fen, "black") +
-      "\n\n⏳ Ждите хода белых...\n💡 Пишите ход прямо в чат: <code>e7e5</code>",
-      { parse_mode: "HTML" }
-    );
+    // Reply to black player
+    const blackBoard = await renderBoard(updated.fen, "black");
+    await ctx.replyWithPhoto(new InputFile(blackBoard, "board.png"), {
+      caption: `♟ <b>Игра началась!</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n⏳ Ждите хода белых...\n💡 Пишите ход прямо в чат: <code>e7e5</code>`,
+      parse_mode: "HTML",
+    });
   }
 
   // ── Commands ────────────────────────────────────────────────────────────────
@@ -299,12 +288,11 @@ async function main() {
     const blackName = game.player_black ? await getPlayerName(game.player_black) : "ожидание...";
     const turnName  = game.turn === "white" ? whiteName : blackName;
     const statusTxt = gameStatusText(chess);
-    await ctx.reply(
+    const caption   =
       `♟ <b>Текущая позиция</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
-      renderBoard(game.fen, isWhite ? "white" : "black") + "\n" +
-      (statusTxt ? `\n${statusTxt}` : `\n🎯 Ход: ${turnName} (${game.turn === "white" ? "⬜" : "⬛"})`),
-      { parse_mode: "HTML" }
-    );
+      (statusTxt ? statusTxt : `🎯 Ход: ${turnName} (${game.turn === "white" ? "⬜" : "⬛"})`);
+    const board = await renderBoard(game.fen, isWhite ? "white" : "black");
+    await ctx.replyWithPhoto(new InputFile(board, "board.png"), { caption, parse_mode: "HTML" });
   });
 
   bot.command("resign", async (ctx) => {
@@ -351,12 +339,11 @@ async function main() {
     const blackName = game.player_black ? await getPlayerName(game.player_black) : "ожидание...";
     const statusTxt = gameStatusText(chess);
     const turnName  = game.turn === "white" ? whiteName : blackName;
-    await ctx.reply(
+    const caption   =
       `♟ <b>Доска</b>\n⬜ ${whiteName}  vs  ⬛ ${blackName}\n\n` +
-      renderBoard(game.fen, isWhite ? "white" : "black") + "\n" +
-      (statusTxt ? `\n${statusTxt}` : `\n🎯 Ход: ${turnName}`),
-      { parse_mode: "HTML" }
-    );
+      (statusTxt ? statusTxt : `🎯 Ход: ${turnName}`);
+    const board = await renderBoard(game.fen, isWhite ? "white" : "black");
+    await ctx.replyWithPhoto(new InputFile(board, "board.png"), { caption, parse_mode: "HTML" });
   });
 
   // ── Text messages (after commands) ──────────────────────────────────────────
@@ -365,7 +352,7 @@ async function main() {
     const userId = String(ctx.from.id);
     log('INFO', `MSG from ${userId}: "${text.slice(0, 40)}"`);
 
-    if (text.startsWith("/")) return; // команды уже обработаны выше
+    if (text.startsWith("/")) return;
 
     const game = await getActiveGame(userId);
     if (!game || game.status !== "active") return;
@@ -377,7 +364,7 @@ async function main() {
       return processMove(ctx, userId, text);
     }
 
-    // Пересылаем текст сопернику
+    // Forward text to opponent
     if (opponentId) {
       const myName = await getPlayerName(userId);
       try {
