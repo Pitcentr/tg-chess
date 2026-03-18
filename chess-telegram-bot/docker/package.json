@@ -5,6 +5,6 @@
     "grammy": "^1.21.1",
     "pocketbase": "^0.21.5",
     "dotenv": "^16.4.5",
-    "chess.js": "^1.0.0"
+    "chess.js": "^0.13.4"
   }
 }

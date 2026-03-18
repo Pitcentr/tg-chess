@@ -15,16 +15,8 @@ function log(level, message, data = null) {
 }
 
 // ====================== ДОСКА ======================
-// Используем буквы — они одинаково выглядят на всех устройствах
-// Белые: заглавные, чёрные: строчные, пустые клетки чередуются светлой/тёмной точкой
-const W = { p: "P", r: "R", n: "N", b: "B", q: "Q", k: "K" };
-const B = { p: "p", r: "r", n: "n", b: "b", q: "q", k: "k" };
-
-// Альтернатива — эмодзи-буквы для красоты
 const PIECE_MAP = {
-  // белые (uppercase)
   P: "♙", R: "♖", N: "♘", B: "♗", Q: "♕", K: "♔",
-  // чёрные (lowercase)
   p: "♟", r: "♜", n: "♞", b: "♝", q: "♛", k: "♚",
 };
 
@@ -38,7 +30,6 @@ function renderBoard(fen, perspective = "white") {
   const rows   = isWhite ? [...board].reverse() : [...board];
   const labels = isWhite ? FILES : [...FILES].reverse();
 
-  // Используем <pre> — моноширинный шрифт в Telegram
   let out = "<pre>\n";
   out += "  " + labels.join(" ") + "\n";
 
@@ -46,12 +37,8 @@ function renderBoard(fen, perspective = "white") {
     const rank = isWhite ? 8 - i : i + 1;
     const displayRow = isWhite ? row : [...row].reverse();
 
-    const cells = displayRow.map((sq, j) => {
-      if (!sq) {
-        // чередование клеток: светлая/тёмная
-        const isLight = (rank + j) % 2 !== 0;
-        return isLight ? "·" : "·";
-      }
+    const cells = displayRow.map((sq) => {
+      if (!sq) return "·";
       const key = sq.color === "w" ? sq.type.toUpperCase() : sq.type;
       return PIECE_MAP[key] || "?";
     });
@@ -65,10 +52,10 @@ function renderBoard(fen, perspective = "white") {
 }
 
 function gameStatusText(chess) {
-  if (chess.isCheckmate()) return "♟ Шах и мат!";
-  if (chess.isStalemate()) return "🤝 Пат — ничья!";
-  if (chess.isDraw())      return "🤝 Ничья!";
-  if (chess.isCheck())     return "⚠️ Шах!";
+  if (chess.in_checkmate()) return "♟ Шах и мат!";
+  if (chess.in_stalemate()) return "🤝 Пат — ничья!";
+  if (chess.in_draw())      return "🤝 Ничья!";
+  if (chess.in_check())     return "⚠️ Шах!";
   return null;
 }
 
@@ -201,9 +188,9 @@ async function main() {
     const newFen    = chess.fen();
     const newTurn   = chess.turn() === "w" ? "white" : "black";
     const statusTxt = gameStatusText(chess);
-    const isOver    = chess.isGameOver();
+    const isOver    = chess.game_over();
     const newStatus = isOver ? "finished" : "active";
-    const winner    = isOver && chess.isCheckmate() ? userId : "";
+    const winner    = isOver && chess.in_checkmate() ? userId : "";
 
     await pb.collection("chess_moves").create({
       game_id:   game.id,
@@ -233,7 +220,7 @@ async function main() {
     if (opponentId) {
       let msg = `${moveInfo}\n\n` + renderBoard(newFen, oppColor) + "\n";
       if (isOver) {
-        msg += chess.isCheckmate() ? `\n♟ Шах и мат! Победили ${moverName}!` : `\n🤝 ${statusTxt}`;
+        msg += chess.in_checkmate() ? `\n♟ Шах и мат! Победили ${moverName}!` : `\n🤝 ${statusTxt}`;
       } else {
         msg += chess.isCheck() ? "\n⚠️ Шах! Ваш ход." : "\n🎯 Ваш ход!";
       }
@@ -241,7 +228,7 @@ async function main() {
     }
 
     if (isOver) {
-      const endMsg = chess.isCheckmate() ? `🏆 Победитель: ${moverName}!` : `🤝 ${statusTxt}`;
+      const endMsg = chess.in_checkmate() ? `🏆 Победитель: ${moverName}!` : `🤝 ${statusTxt}`;
       await ctx.reply(endMsg);
       if (opponentId) {
         try { await bot.api.sendMessage(opponentId, endMsg); } catch {}
@@ -480,6 +467,9 @@ async function main() {
       { parse_mode: "HTML" }
     );
   }
+
+  // Удаляем вебхук если был установлен — иначе polling не запустится
+  await bot.api.deleteWebhook({ drop_pending_updates: false });
 
   // ==================== ЗАПУСК ====================
   await bot.start();
