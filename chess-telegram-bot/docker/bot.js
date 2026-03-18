@@ -151,6 +151,62 @@ function looksLikeMove(text) {
 const bot = new Bot(process.env.TG_TOKEN || "");
 const pb  = new PocketBase(process.env.PB_URL || "");
 
+// ── DeepSeek position evaluation ─────────────────────────────────────────────
+async function evaluatePosition(fen, whiteName, blackName) {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) return null;
+
+  const prompt =
+    `You are a chess grandmaster. Analyze this chess position (FEN notation) and estimate winning chances.\n\n` +
+    `FEN: ${fen}\n\n` +
+    `Players: White = ${whiteName}, Black = ${blackName}\n\n` +
+    `Respond ONLY in this exact JSON format, no other text:\n` +
+    `{"white": <0-100>, "black": <0-100>, "draw": <0-100>, "comment": "<one short sentence in Russian>"}\n\n` +
+    `The three numbers must sum to 100. Be realistic based on material and position.`;
+
+  try {
+    const res = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 120,
+        temperature: 0.2,
+      }),
+    });
+
+    if (!res.ok) { log('WARN', `DeepSeek API error: ${res.status}`); return null; }
+
+    const data  = await res.json();
+    const text  = data.choices?.[0]?.message?.content?.trim() || "";
+    // Extract JSON even if wrapped in markdown code block
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const eval_ = JSON.parse(match[0]);
+    return eval_;
+  } catch (err) {
+    log('WARN', `DeepSeek eval failed: ${err.message}`);
+    return null;
+  }
+}
+
+function formatEval(eval_, whiteName, blackName) {
+  if (!eval_) return "";
+  const wBar = "█".repeat(Math.round(eval_.white / 10));
+  const bBar = "█".repeat(Math.round(eval_.black / 10));
+  return (
+    `\n\n📊 <b>Оценка позиции:</b>\n` +
+    `⬜ ${whiteName}: <b>${eval_.white}%</b> ${wBar}\n` +
+    `⬛ ${blackName}: <b>${eval_.black}%</b> ${bBar}\n` +
+    (eval_.draw > 5 ? `🤝 Ничья: <b>${eval_.draw}%</b>\n` : "") +
+    (eval_.comment ? `💡 ${eval_.comment}` : "")
+  );
+}
+
 async function main() {
   const missing = REQUIRED_ENV.filter(v => !process.env[v]);
   if (missing.length > 0) {
@@ -234,13 +290,14 @@ async function main() {
     const isOver    = chess.game_over();
     const newStatus = isOver ? "finished" : "active";
     const winner    = isOver && chess.in_checkmate() ? userId : "";
+    const newMoveCount = (game.move_count || 0) + 1;
 
     await pb.collection("chess_moves").create(
       { game_id: game.id, player_id: userId, move: moveStr, fen_after: newFen },
       { requestKey: null }
     );
     await pb.collection("chess_games").update(game.id,
-      { fen: newFen, turn: newTurn, status: newStatus, winner },
+      { fen: newFen, turn: newTurn, status: newStatus, winner, move_count: newMoveCount },
       { requestKey: null }
     );
 
@@ -250,7 +307,15 @@ async function main() {
     const opponentId = isWhite ? game.player_black : game.player_white;
     const oppColor   = isWhite ? "black" : "white";
     const moveInfo   = `✅ Ход: <code>${result.san}</code> (${moverName})`;
-    const myCaption  = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...");
+
+    // DeepSeek eval every 3rd move (skip if game over)
+    let evalText = "";
+    if (!isOver && newMoveCount % 3 === 0) {
+      const eval_ = await evaluatePosition(newFen, whiteName, blackName);
+      evalText = formatEval(eval_, whiteName, blackName);
+    }
+
+    const myCaption = moveInfo + (statusTxt ? `\n\n${statusTxt}` : "\n\n⏳ Ждём хода соперника...") + evalText;
 
     const myBoard = await renderBoard(newFen, myColor);
     await ctx.replyWithPhoto(new InputFile(myBoard, "board.png"), { caption: myCaption, parse_mode: "HTML" });
@@ -262,13 +327,12 @@ async function main() {
       try {
         const oppBoard = await renderBoard(newFen, oppColor);
         await bot.api.sendPhoto(opponentId, new InputFile(oppBoard, "board.png"), {
-          caption: moveInfo + oppStatus, parse_mode: "HTML",
+          caption: moveInfo + oppStatus + evalText, parse_mode: "HTML",
         });
       } catch {}
     }
 
     if (isOver) {
-   
       const endMsg = chess.in_checkmate() ? `🏆 Победитель: ${moverName}!` : `🤝 ${statusTxt}`;
       await ctx.reply(endMsg);
       if (opponentId) try { await bot.api.sendMessage(opponentId, endMsg); } catch {}
@@ -482,6 +546,7 @@ async function ensureCollections() {
       { name: "fen",          type: "text", required: true },
       { name: "turn",         type: "text", required: true },
       { name: "winner",       type: "text", required: false },
+      { name: "move_count",   type: "number", required: false },
     ]},
     { name: "chess_moves", type: "base", fields: [
       { name: "game_id",   type: "text", required: true },
