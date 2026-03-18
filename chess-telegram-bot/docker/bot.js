@@ -36,25 +36,27 @@ async function getPieceImage(piece) {
   if (pieceImageCache[piece]) return pieceImageCache[piece];
   const inner = PIECE_SVG[piece];
   if (!inner) return null;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45" width="45" height="45">${inner}</svg>`;
+  // Render SVG at 2× native size (90×90) for crisp pieces
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45" width="90" height="90">${inner}</svg>`;
   const img = await loadImage(Buffer.from(svg));
   pieceImageCache[piece] = img;
   return img;
 }
 
-const LIGHT = "#F0D9B5";
-const DARK  = "#B58863";
-const SQ    = 72;
-const PAD   = 20;
-const SIZE  = SQ * 8 + PAD * 2;
+const LIGHT  = "#F0D9B5";
+const DARK   = "#B58863";
+const BORDER = "#2b2b2b";
+const SQ     = 90;   // square size in px (2× = retina-ready)
+const PAD    = 30;   // padding for coordinate labels
+const SIZE   = SQ * 8 + PAD * 2;
 
 async function renderBoard(fen, perspective = "white") {
   const canvas  = createCanvas(SIZE, SIZE);
   const ctx     = canvas.getContext("2d");
   const flipped = perspective === "black";
 
-  // Dark border
-  ctx.fillStyle = "#2b2b2b";
+  // Border background
+  ctx.fillStyle = BORDER;
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   // Parse FEN position
@@ -78,28 +80,30 @@ async function renderBoard(fen, perspective = "white") {
     }
   }
 
-  // Coordinate labels — drawn ON the squares (Lichess style)
-  ctx.font         = "bold 11px sans-serif";
-  ctx.textBaseline = "top";
-  ctx.textAlign    = "left";
-  for (let r = 0; r < 8; r++) {
-    const rank = flipped ? r + 1 : 8 - r;
-    const dr   = r; // display row index
-    // rank label top-left of the square on file a
-    ctx.fillStyle = dr % 2 === 0 ? DARK : LIGHT;
-    ctx.fillText(String(rank), PAD + 2, PAD + dr * SQ + 2);
-  }
-  ctx.textBaseline = "bottom";
-  ctx.textAlign    = "right";
+  // ── Coordinate labels in the PAD border ──────────────────────────────────
   const files = flipped ? "hgfedcba" : "abcdefgh";
-  for (let f = 0; f < 8; f++) {
-    // file label bottom-right of the square on rank 1
-    const df = f;
-    ctx.fillStyle = df % 2 === 0 ? LIGHT : DARK;
-    ctx.fillText(files[f], PAD + (df + 1) * SQ - 2, PAD + 8 * SQ - 2);
+  ctx.font         = "bold 16px sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.textAlign    = "center";
+
+  // Rank numbers — left and right PAD strips
+  for (let r = 0; r < 8; r++) {
+    const rank = String(flipped ? r + 1 : 8 - r);
+    const y    = PAD + r * SQ + SQ / 2;
+    ctx.fillStyle = "#ccc";
+    ctx.fillText(rank, PAD / 2, y);
+    ctx.fillText(rank, SIZE - PAD / 2, y);
   }
 
-  // Draw pieces
+  // File letters — top and bottom PAD strips
+  for (let f = 0; f < 8; f++) {
+    const x = PAD + f * SQ + SQ / 2;
+    ctx.fillStyle = "#ccc";
+    ctx.fillText(files[f], x, PAD / 2);
+    ctx.fillText(files[f], x, SIZE - PAD / 2);
+  }
+
+  // Draw pieces (SVG already at 90×90, drawn 1:1)
   for (let r = 0; r < 8; r++) {
     for (let f = 0; f < 8; f++) {
       const piece = board[r][f];
