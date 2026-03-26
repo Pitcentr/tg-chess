@@ -216,47 +216,85 @@ async function main() {
 
   log('INFO', 'Запуск Chess Bot');
 
-  try {
-    await pb.collection("_superusers").authWithPassword(process.env.PB_ADMIN, process.env.PB_PASSWORD);
-    log('INFO', 'Успешная аутентификация в PocketBase');
-  } catch (err) {
-    log('ERROR', 'Не удалось авторизоваться в PocketBase', err.message);
-    process.exit(1);
+  // ── PocketBase auth with auto-refresh ────────────────────────────────────
+  async function ensurePBAuth() {
+    try {
+      if (!pb.authStore.isValid) {
+        await pb.collection("_superusers").authWithPassword(process.env.PB_ADMIN, process.env.PB_PASSWORD);
+        log('INFO', 'PocketBase auth refreshed');
+      }
+    } catch (err) {
+      log('ERROR', 'PB auth failed', err.message);
+      throw err;
+    }
   }
+
+  await ensurePBAuth();
+  log('INFO', 'Успешная аутентификация в PocketBase');
+
+  // Auto-refresh PB token every 30 minutes
+  setInterval(async () => {
+    try {
+      await ensurePBAuth();
+    } catch (err) {
+      log('ERROR', 'Не удалось обновить PB токен', err.message);
+    }
+  }, 30 * 60 * 1000);
 
   await ensureCollections();
 
   async function getOrCreateUser(telegramId, username, firstName) {
     const id = String(telegramId);
     try {
+      await ensurePBAuth();
       return await pb.collection("chess_users").getFirstListItem(`telegram_id="${id}"`, { requestKey: null });
-    } catch {
-      return await pb.collection("chess_users").create(
-        { telegram_id: id, username: username || "", first_name: firstName || "" },
-        { requestKey: null }
-      );
+    } catch (err) {
+      log('DEBUG', `User not found, creating: ${id}`);
+      try {
+        await ensurePBAuth();
+        return await pb.collection("chess_users").create(
+          { telegram_id: id, username: username || "", first_name: firstName || "" },
+          { requestKey: null }
+        );
+      } catch (createErr) {
+        log('ERROR', `Failed to create user ${id}`, createErr.message);
+        throw createErr;
+      }
     }
   }
 
   async function getActiveGame(userId) {
     try {
+      await ensurePBAuth();
       return await pb.collection("chess_games").getFirstListItem(
         `(player_white="${userId}" || player_black="${userId}") && (status="active" || status="waiting")`,
         { requestKey: null }
       );
-    } catch { return null; }
+    } catch (err) {
+      if (err?.status !== 404) log('ERROR', `getActiveGame failed for ${userId}`, err.message);
+      return null;
+    }
   }
 
   async function getGameById(id) {
-    try { return await pb.collection("chess_games").getOne(id, { requestKey: null }); }
-    catch { return null; }
+    try {
+      await ensurePBAuth();
+      return await pb.collection("chess_games").getOne(id, { requestKey: null });
+    } catch (err) {
+      if (err?.status !== 404) log('ERROR', `getGameById failed for ${id}`, err.message);
+      return null;
+    }
   }
 
   async function getPlayerName(userId) {
     try {
+      await ensurePBAuth();
       const u = await pb.collection("chess_users").getFirstListItem(`telegram_id="${userId}"`, { requestKey: null });
       return u.username ? `@${u.username}` : (u.first_name || `User ${userId}`);
-    } catch { return `User ${userId}`; }
+    } catch (err) {
+      if (err?.status !== 404) log('ERROR', `getPlayerName failed for ${userId}`, err.message);
+      return `User ${userId}`;
+    }
   }
 
   async function processMove(ctx, userId, moveStr) {
@@ -292,14 +330,21 @@ async function main() {
     const winner    = isOver && chess.in_checkmate() ? userId : "";
     const newMoveCount = (game.move_count || 0) + 1;
 
-    await pb.collection("chess_moves").create(
-      { game_id: game.id, player_id: userId, move: moveStr, fen_after: newFen },
-      { requestKey: null }
-    );
-    await pb.collection("chess_games").update(game.id,
-      { fen: newFen, turn: newTurn, status: newStatus, winner, move_count: newMoveCount },
-      { requestKey: null }
-    );
+    try {
+      await ensurePBAuth();
+      await pb.collection("chess_moves").create(
+        { game_id: game.id, player_id: userId, move: moveStr, fen_after: newFen },
+        { requestKey: null }
+      );
+      await ensurePBAuth();
+      await pb.collection("chess_games").update(game.id,
+        { fen: newFen, turn: newTurn, status: newStatus, winner, move_count: newMoveCount },
+        { requestKey: null }
+      );
+    } catch (err) {
+      log('ERROR', `Failed to save move for game ${game.id}`, err.message);
+      return ctx.reply("❌ Ошибка сохранения хода. Попробуйте ещё раз.");
+    }
 
     const whiteName  = await getPlayerName(game.player_white);
     const blackName  = await getPlayerName(game.player_black);
@@ -341,7 +386,13 @@ async function main() {
     if (game.status !== "waiting")    return ctx.reply("❌ Игра уже началась или завершена.");
     if (game.player_white === userId) return ctx.reply("❌ Нельзя играть с собой.");
 
-    await pb.collection("chess_games").update(gameId, { player_black: userId, status: "active" }, { requestKey: null });
+    try {
+      await ensurePBAuth();
+      await pb.collection("chess_games").update(gameId, { player_black: userId, status: "active" }, { requestKey: null });
+    } catch (err) {
+      log('ERROR', `Failed to join game ${gameId}`, err.message);
+      return ctx.reply("❌ Ошибка присоединения к игре. Попробуйте ещё раз.");
+    }
     const updated   = await getGameById(gameId);
     const whiteName = await getPlayerName(updated.player_white);
     const blackName = await getPlayerName(updated.player_black);
@@ -385,10 +436,17 @@ async function main() {
       return ctx.reply(`⚠️ У вас уже есть активная игра (ID: <code>${existing.id}</code>).\nСначала завершите её: /resign`, { parse_mode: "HTML" });
     }
     const chess = new Chess();
-    const game  = await pb.collection("chess_games").create(
-      { player_white: String(ctx.from.id), player_black: "", status: "waiting", fen: chess.fen(), turn: "white", winner: "" },
-      { requestKey: null }
-    );
+    let game;
+    try {
+      await ensurePBAuth();
+      game = await pb.collection("chess_games").create(
+        { player_white: String(ctx.from.id), player_black: "", status: "waiting", fen: chess.fen(), turn: "white", winner: "" },
+        { requestKey: null }
+      );
+    } catch (err) {
+      log('ERROR', `Failed to create game for ${ctx.from.id}`, err.message);
+      return ctx.reply("❌ Ошибка создания игры. Попробуйте ещё раз.");
+    }
     const kb = new InlineKeyboard().text("✅ Присоединиться", `join_${game.id}`);
     await ctx.reply(
       `♟ <b>Новая игра создана!</b>\n\nВы играете белыми ⬜\n\nID игры: <code>${game.id}</code>\n\n` +
@@ -402,11 +460,17 @@ async function main() {
     await getOrCreateUser(ctx.from.id, ctx.from.username, ctx.from.first_name);
     const gameId = ctx.match?.trim();
     if (!gameId) {
-      const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
-      if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
-      const kb = new InlineKeyboard();
-      for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
-      return ctx.reply("🎮 Открытые игры:", { reply_markup: kb });
+      try {
+        await ensurePBAuth();
+        const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
+        if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
+        const kb = new InlineKeyboard();
+        for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
+        return ctx.reply("🎮 Открытые игры:", { reply_markup: kb });
+      } catch (err) {
+        log('ERROR', `Failed to list games`, err.message);
+        return ctx.reply("❌ Ошибка загрузки списка игр.");
+      }
     }
     await doJoinGame(ctx, gameId, String(ctx.from.id));
   });
@@ -441,7 +505,13 @@ async function main() {
     if (!game) return ctx.reply("❌ У вас нет активной игры.");
     const isWhite    = game.player_white === userId;
     const opponentId = isWhite ? game.player_black : game.player_white;
-    await pb.collection("chess_games").update(game.id, { status: "finished", winner: opponentId || "" }, { requestKey: null });
+    try {
+      await ensurePBAuth();
+      await pb.collection("chess_games").update(game.id, { status: "finished", winner: opponentId || "" }, { requestKey: null });
+    } catch (err) {
+      log('ERROR', `Failed to resign game ${game.id}`, err.message);
+      return ctx.reply("❌ Ошибка завершения игры. Попробуйте ещё раз.");
+    }
     const myName = await getPlayerName(userId);
     await ctx.reply(`🏳 ${myName} сдался. Игра завершена.`);
     if (opponentId) {
@@ -451,11 +521,17 @@ async function main() {
   });
 
   bot.command("games", async (ctx) => {
-    const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
-    if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
-    const kb = new InlineKeyboard();
-    for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
-    await ctx.reply(`🎮 Открытые игры (${res.items.length}):`, { reply_markup: kb });
+    try {
+      await ensurePBAuth();
+      const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
+      if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
+      const kb = new InlineKeyboard();
+      for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
+      await ctx.reply(`🎮 Открытые игры (${res.items.length}):`, { reply_markup: kb });
+    } catch (err) {
+      log('ERROR', `Failed to list games`, err.message);
+      return ctx.reply("❌ Ошибка загрузки списка игр.");
+    }
   });
 
   bot.command("eval", async (ctx) => {
@@ -524,7 +600,9 @@ async function main() {
   });
 
   bot.catch((err) => {
-    log('ERROR', `Handler error: ${err.message}`, String(err.error));
+    log('ERROR', `Handler error: ${err.message}`);
+    if (err.stack) log('ERROR', 'Stack trace:', err.stack);
+    if (err.error) log('ERROR', 'Error details:', err.error);
     try { err.ctx.reply("❌ Внутренняя ошибка.").catch(() => {}); } catch {}
   });
 
@@ -586,7 +664,12 @@ async function ensureCollections() {
         try {
           await pb.collections.create(col);
           log('INFO', `Создана коллекция '${col.name}'`);
-        } catch (e) { log('ERROR', `Не удалось создать '${col.name}'`, e.message); }
+        } catch (e) {
+          log('ERROR', `Не удалось создать '${col.name}'`, e.message);
+          if (e.data) log('ERROR', 'Collection creation error details:', e.data);
+        }
+      } else {
+        log('ERROR', `Error checking collection '${col.name}'`, err.message);
       }
     }
   }
