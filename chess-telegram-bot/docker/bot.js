@@ -216,15 +216,29 @@ async function main() {
 
   log('INFO', 'Запуск Chess Bot');
 
-  // ── PocketBase auth with auto-refresh ────────────────────────────────────
+  // ── PocketBase auth ───────────────────────────────────────────────────────
+  // Always re-authenticate — don't trust authStore.isValid, it can lie
   async function ensurePBAuth() {
     try {
-      if (!pb.authStore.isValid) {
-        await pb.collection("_superusers").authWithPassword(process.env.PB_ADMIN, process.env.PB_PASSWORD);
-        log('INFO', 'PocketBase auth refreshed');
-      }
+      await pb.collection("_superusers").authWithPassword(
+        process.env.PB_ADMIN, process.env.PB_PASSWORD
+      );
     } catch (err) {
       log('ERROR', 'PB auth failed', err.message);
+      throw err;
+    }
+  }
+
+  // Wrap any PB call with auto-retry on 401/403
+  async function pbCall(fn) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403) {
+        log('WARN', `PB auth error (${err.status}), re-authenticating...`);
+        await ensurePBAuth();
+        return await fn(); // retry once
+      }
       throw err;
     }
   }
@@ -232,29 +246,35 @@ async function main() {
   await ensurePBAuth();
   log('INFO', 'Успешная аутентификация в PocketBase');
 
-  // Auto-refresh PB token every 30 minutes
+  // Proactive token refresh every 20 minutes (PB tokens expire in ~1h)
   setInterval(async () => {
     try {
       await ensurePBAuth();
+      log('INFO', 'PB token refreshed (scheduled)');
     } catch (err) {
-      log('ERROR', 'Не удалось обновить PB токен', err.message);
+      log('ERROR', 'Scheduled PB token refresh failed', err.message);
     }
-  }, 30 * 60 * 1000);
+  }, 20 * 60 * 1000);
 
   await ensureCollections();
 
   async function getOrCreateUser(telegramId, username, firstName) {
     const id = String(telegramId);
     try {
-      await ensurePBAuth();
-      return await pb.collection("chess_users").getFirstListItem(`telegram_id="${id}"`, { requestKey: null });
+      return await pbCall(() =>
+        pb.collection("chess_users").getFirstListItem(`telegram_id="${id}"`, { requestKey: null })
+      );
     } catch (err) {
-      log('DEBUG', `User not found, creating: ${id}`);
+      if (err?.status !== 404) {
+        log('ERROR', `getOrCreateUser lookup failed for ${id}`, err.message);
+        throw err;
+      }
       try {
-        await ensurePBAuth();
-        return await pb.collection("chess_users").create(
-          { telegram_id: id, username: username || "", first_name: firstName || "" },
-          { requestKey: null }
+        return await pbCall(() =>
+          pb.collection("chess_users").create(
+            { telegram_id: id, username: username || "", first_name: firstName || "" },
+            { requestKey: null }
+          )
         );
       } catch (createErr) {
         log('ERROR', `Failed to create user ${id}`, createErr.message);
@@ -265,10 +285,11 @@ async function main() {
 
   async function getActiveGame(userId) {
     try {
-      await ensurePBAuth();
-      return await pb.collection("chess_games").getFirstListItem(
-        `(player_white="${userId}" || player_black="${userId}") && (status="active" || status="waiting")`,
-        { requestKey: null }
+      return await pbCall(() =>
+        pb.collection("chess_games").getFirstListItem(
+          `(player_white="${userId}" || player_black="${userId}") && (status="active" || status="waiting")`,
+          { requestKey: null }
+        )
       );
     } catch (err) {
       if (err?.status !== 404) log('ERROR', `getActiveGame failed for ${userId}`, err.message);
@@ -278,8 +299,9 @@ async function main() {
 
   async function getGameById(id) {
     try {
-      await ensurePBAuth();
-      return await pb.collection("chess_games").getOne(id, { requestKey: null });
+      return await pbCall(() =>
+        pb.collection("chess_games").getOne(id, { requestKey: null })
+      );
     } catch (err) {
       if (err?.status !== 404) log('ERROR', `getGameById failed for ${id}`, err.message);
       return null;
@@ -288,8 +310,9 @@ async function main() {
 
   async function getPlayerName(userId) {
     try {
-      await ensurePBAuth();
-      const u = await pb.collection("chess_users").getFirstListItem(`telegram_id="${userId}"`, { requestKey: null });
+      const u = await pbCall(() =>
+        pb.collection("chess_users").getFirstListItem(`telegram_id="${userId}"`, { requestKey: null })
+      );
       return u.username ? `@${u.username}` : (u.first_name || `User ${userId}`);
     } catch (err) {
       if (err?.status !== 404) log('ERROR', `getPlayerName failed for ${userId}`, err.message);
@@ -331,15 +354,17 @@ async function main() {
     const newMoveCount = (game.move_count || 0) + 1;
 
     try {
-      await ensurePBAuth();
-      await pb.collection("chess_moves").create(
-        { game_id: game.id, player_id: userId, move: moveStr, fen_after: newFen },
-        { requestKey: null }
+      await pbCall(() =>
+        pb.collection("chess_moves").create(
+          { game_id: game.id, player_id: userId, move: moveStr, fen_after: newFen },
+          { requestKey: null }
+        )
       );
-      await ensurePBAuth();
-      await pb.collection("chess_games").update(game.id,
-        { fen: newFen, turn: newTurn, status: newStatus, winner, move_count: newMoveCount },
-        { requestKey: null }
+      await pbCall(() =>
+        pb.collection("chess_games").update(game.id,
+          { fen: newFen, turn: newTurn, status: newStatus, winner, move_count: newMoveCount },
+          { requestKey: null }
+        )
       );
     } catch (err) {
       log('ERROR', `Failed to save move for game ${game.id}`, err.message);
@@ -387,8 +412,9 @@ async function main() {
     if (game.player_white === userId) return ctx.reply("❌ Нельзя играть с собой.");
 
     try {
-      await ensurePBAuth();
-      await pb.collection("chess_games").update(gameId, { player_black: userId, status: "active" }, { requestKey: null });
+      await pbCall(() =>
+        pb.collection("chess_games").update(gameId, { player_black: userId, status: "active" }, { requestKey: null })
+      );
     } catch (err) {
       log('ERROR', `Failed to join game ${gameId}`, err.message);
       return ctx.reply("❌ Ошибка присоединения к игре. Попробуйте ещё раз.");
@@ -439,9 +465,11 @@ async function main() {
     let game;
     try {
       await ensurePBAuth();
-      game = await pb.collection("chess_games").create(
-        { player_white: String(ctx.from.id), player_black: "", status: "waiting", fen: chess.fen(), turn: "white", winner: "" },
-        { requestKey: null }
+      game = await pbCall(() =>
+        pb.collection("chess_games").create(
+          { player_white: String(ctx.from.id), player_black: "", status: "waiting", fen: chess.fen(), turn: "white", winner: "" },
+          { requestKey: null }
+        )
       );
     } catch (err) {
       log('ERROR', `Failed to create game for ${ctx.from.id}`, err.message);
@@ -462,7 +490,9 @@ async function main() {
     if (!gameId) {
       try {
         await ensurePBAuth();
-        const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
+        const res = await pbCall(() =>
+          pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null })
+        );
         if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
         const kb = new InlineKeyboard();
         for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
@@ -506,8 +536,9 @@ async function main() {
     const isWhite    = game.player_white === userId;
     const opponentId = isWhite ? game.player_black : game.player_white;
     try {
-      await ensurePBAuth();
-      await pb.collection("chess_games").update(game.id, { status: "finished", winner: opponentId || "" }, { requestKey: null });
+      await pbCall(() =>
+        pb.collection("chess_games").update(game.id, { status: "finished", winner: opponentId || "" }, { requestKey: null })
+      );
     } catch (err) {
       log('ERROR', `Failed to resign game ${game.id}`, err.message);
       return ctx.reply("❌ Ошибка завершения игры. Попробуйте ещё раз.");
@@ -522,8 +553,9 @@ async function main() {
 
   bot.command("games", async (ctx) => {
     try {
-      await ensurePBAuth();
-      const res = await pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null });
+      const res = await pbCall(() =>
+        pb.collection("chess_games").getList(1, 10, { filter: 'status="waiting"', requestKey: null })
+      );
       if (res.items.length === 0) return ctx.reply("📭 Нет открытых игр. Создайте свою: /newgame");
       const kb = new InlineKeyboard();
       for (const g of res.items) kb.text(`⬜ ${await getPlayerName(g.player_white)} ищет соперника`, `join_${g.id}`).row();
