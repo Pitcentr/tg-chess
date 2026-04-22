@@ -4,7 +4,7 @@ name: Chess Telegram Bot
 tagline: Play chess with friends via Telegram
 icon: https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/icon.svg
 category: social
-version: "1.0.20"
+version: "1.0.21"
 description: >-
   Telegram bot for playing chess with friends.
 
@@ -26,7 +26,7 @@ support: https://github.com/pitcentr/chess-telegram-bot/issues
 gallery:
   - https://raw.githubusercontent.com/pitcentr/chess-telegram-bot/main/chess-telegram-bot/metadata/screenshots/screenshot1.svg
 releaseNotes: >-
-  v1.0.20: Обновлены шахматные фигуры на набор Staunty. Добавлен вывод интересных фактов о шахматах после каждого 3-го хода (60 уникальных фактов).
+  v1.0.21: Исправлена критическая ошибка инициализации бота. Обновлены шахматные фигуры на набор Staunty. Добавлен вывод интересных фактов о шахматах после каждого 3-го хода (60 уникальных фактов).
 dependencies: []
 path: ""
 defaultUsername: ""

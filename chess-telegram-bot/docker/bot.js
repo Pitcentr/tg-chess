@@ -285,6 +285,9 @@ async function main() {
 
   log('INFO', 'Запуск Chess Bot');
 
+  // ── Инициализация бота ────────────────────────────────────────────────────
+  bot = new Bot(process.env.TG_TOKEN);
+
   // ── PocketBase auth ───────────────────────────────────────────────────────
   // Always re-authenticate — don't trust authStore.isValid, it can lie
   async function ensurePBAuth() {
